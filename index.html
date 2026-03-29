@@ -214,7 +214,7 @@
 <body>
 
 <div class="container">
-    <h1>台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V015</span></h1>
+    <h1>台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V016</span></h1>
     
     <!-- 同步設定區塊 -->
     <div style="background: #fcf3cf; padding: 10px; border-radius: 8px; margin-bottom: 20px; font-size: 0.85rem;">
@@ -272,7 +272,7 @@
 
     <div class="btn-group">
         <button class="btn-clear" onclick="clearInputs()">重設</button>
-        <button class="btn-calc" onclick="calculate()">計算獲利並紀錄</button>
+        <button class="btn-calc" id="mainBtn" onclick="calculate()">計算獲利並紀錄</button>
     </div>
 
     <div id="resultPanel" class="result-panel" style="display: none;">
@@ -340,6 +340,7 @@
 <script>
     let stockMap = new Map();
     let etfSet = new Set();
+    let editingId = null; 
     const FEE_RATE = 0.001425;
     const TAX_RATE_STOCK = 0.003;
     const TAX_RATE_ETF = 0.001;
@@ -594,18 +595,33 @@
         roiEl.className = profit >= 0 ? 'positive' : 'negative';
 
         const record = {
-            id: Date.now(), time: timeStr, code: code, name: name, buy: buyPrice,
+            id: editingId || Date.now(),
+            time: timeStr, code: code, name: name, buy: buyPrice,
             sell: sellPrice, qty: quantity, profit: Math.round(profit),
             totalCost: totalCost, totalIncome: totalIncome
         };
         saveRecord(record);
+        
+        if (editingId) {
+            editingId = null;
+            document.getElementById('mainBtn').textContent = '計算獲利並紀錄';
+            document.getElementById('mainBtn').style.backgroundColor = 'var(--primary-color)';
+        }
     }
 
     function saveRecord(record) {
         let history = JSON.parse(localStorage.getItem('stock_history') || '[]');
-        history.unshift(record);
+        
+        if (editingId) {
+            const index = history.findIndex(r => r.id === editingId);
+            if (index !== -1) history[index] = record;
+            syncUpdateToGoogle(record);
+        } else {
+            history.unshift(record);
+            syncToGoogle(record);
+        }
+        
         localStorage.setItem('stock_history', JSON.stringify(history));
-        syncToGoogle(record);
         renderHistory();
     }
 
@@ -630,7 +646,10 @@
                 <td>${rec.qty}</td>
                 <td class="${rec.profit >= 0 ? 'positive' : 'negative'}">${rec.profit.toLocaleString()}</td>
                 <td class="${rec.profit >= 0 ? 'positive' : 'negative'}">${roi.toFixed(2)}%</td>
-                <td><span class="delete-btn" onclick="deleteRecord(${rec.id})">刪除</span></td>
+                <td>
+                    <span class="delete-btn" style="color: #3498db; margin-right: 10px;" onclick="editRecord(${rec.id})">修改</span>
+                    <span class="delete-btn" onclick="deleteRecord(${rec.id})">刪除</span>
+                </td>
             `;
             body.appendChild(tr);
         });
@@ -639,6 +658,47 @@
         const overallRoi = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
         document.getElementById('avgRoiSum').textContent = `${overallRoi.toFixed(2)}%`;
         document.getElementById('avgRoiSum').className = overallRoi >= 0 ? 'positive' : 'negative';
+    }
+
+    // 進入編輯模式
+    function editRecord(id) {
+        let history = JSON.parse(localStorage.getItem('stock_history') || '[]');
+        const rec = history.find(r => r.id === id);
+        if (!rec) return;
+
+        editingId = id;
+        
+        // 填回輸入框
+        document.getElementById('stockCode').value = rec.code;
+        document.getElementById('buyPrice').value = rec.buy;
+        document.getElementById('sellPrice').value = rec.sell;
+        document.getElementById('quantity').value = rec.qty;
+        
+        // 處理日期格式 (YYYY/MM/DD -> YYYY-MM-DD)
+        if (rec.time) {
+            document.getElementById('tradeDate').value = rec.time.replace(/\//g, '-');
+        }
+        
+        // 更新 UI 狀態
+        document.getElementById('resStockName').textContent = rec.name;
+        document.getElementById('mainBtn').textContent = '確認修改並更新紀錄';
+        document.getElementById('mainBtn').style.backgroundColor = '#f39c12';
+        
+        // 捲動回頂部方便修改
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    async function syncUpdateToGoogle(record) {
+        const url = localStorage.getItem('gas_url');
+        if (!url) return;
+        try {
+            await fetch(url, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({ action: "update", data: record })
+            });
+            updateLastSyncStatus();
+        } catch (e) { console.error(e); }
     }
 
     function deleteRecord(id) {
