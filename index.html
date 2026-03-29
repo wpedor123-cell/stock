@@ -214,7 +214,7 @@
 <body>
 
 <div class="container">
-    <h1>台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V017</span></h1>
+    <h1>台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V18</span></h1>
     
     <!-- 同步設定區塊 -->
     <div style="background: #fcf3cf; padding: 10px; border-radius: 8px; margin-bottom: 20px; font-size: 0.85rem;">
@@ -225,6 +225,7 @@
                 <div style="display: flex; gap: 10px;">
                     <button onclick="saveGasSettings()" style="background: #f39c12; font-size: 0.8rem; padding: 5px 15px;">儲存網址</button>
                     <button onclick="fetchFromGoogle()" id="syncBtn" style="background: #2980b9; font-size: 0.8rem; padding: 5px 15px;">立即手動同步</button>
+                    <button onclick="syncAllToGoogle()" id="syncAllBtn" style="background: #27ae60; font-size: 0.8rem; padding: 5px 15px;">上傳所有資料到雲端</button>
                 </div>
                 <small style="color: #666;">💡 只要各裝置貼上相同網址，開啟網頁時會自動完成同步。</small>
             </div>
@@ -462,7 +463,6 @@
         const cacheBuster = `?v=${Date.now()}`;
         const endpoints = [
             'stock_list.json' + cacheBuster,
-            'stock_list.jason' + cacheBuster, 
             'https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL',
             'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes', 
             'https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL',
@@ -598,7 +598,9 @@
             id: editingId || Date.now(),
             time: timeStr, code: code, name: name, buy: buyPrice,
             sell: sellPrice, qty: quantity, profit: Math.round(profit),
-            totalCost: totalCost, totalIncome: totalIncome
+            roi: parseFloat(roi.toFixed(2)),
+            totalCost: totalCost, totalIncome: totalIncome,
+            lastModified: Date.now()
         };
         saveRecord(record);
         
@@ -688,6 +690,34 @@
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
+    async function syncAllToGoogle() {
+        const url = localStorage.getItem('gas_url');
+        if (!url) { alert('請先設定 GAS 網址'); return; }
+        const history = JSON.parse(localStorage.getItem('stock_history') || '[]');
+        if (history.length === 0) { alert('目前沒有紀錄可同步'); return; }
+        
+        if (!confirm(`確定要將本地 ${history.length} 筆資料全部同步到雲端嗎？\n(這將補充雲端缺失的資料或更新舊資料)`)) return;
+        
+        const btn = document.getElementById('syncAllBtn');
+        const oldText = btn.textContent;
+        btn.textContent = '同步中...'; btn.disabled = true;
+        
+        try {
+            await fetch(url, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({ action: "sync_all", data: history })
+            });
+            alert('同步請求已送出！');
+            updateLastSyncStatus();
+        } catch (e) { 
+            console.error('同步失敗:', e);
+            alert('同步發生錯誤，請檢查網路或 GAS 網址');
+        } finally {
+            btn.textContent = oldText; btn.disabled = false;
+        }
+    }
+
     async function syncUpdateToGoogle(record) {
         const url = localStorage.getItem('gas_url');
         if (!url) return;
@@ -698,7 +728,7 @@
                 body: JSON.stringify({ action: "update", data: record })
             });
             updateLastSyncStatus();
-        } catch (e) { console.error(e); }
+        } catch (e) { console.error('更新同步失敗:', e); }
     }
 
     function deleteRecord(id) {
@@ -736,7 +766,7 @@
                 body: JSON.stringify({ action: "add", data: record })
             });
             updateLastSyncStatus();
-        } catch (e) { console.error(e); }
+        } catch (e) { console.error('新增同步失敗:', e); }
     }
 
     async function syncDeleteToGoogle(id) {
@@ -749,7 +779,7 @@
                 body: JSON.stringify({ action: "delete", id: id })
             });
             updateLastSyncStatus();
-        } catch (e) { console.error(e); }
+        } catch (e) { console.error('刪除同步失敗:', e); }
     }
 
     async function syncClearToGoogle() {
@@ -758,7 +788,7 @@
         try {
             await fetch(url, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: "clear" }) });
             updateLastSyncStatus();
-        } catch (e) { console.error(e); }
+        } catch (e) { console.error('清除同步失敗:', e); }
     }
 
     async function fetchFromGoogle(isAuto = false) {
@@ -769,17 +799,25 @@
         try {
             const response = await fetch(url);
             const remoteData = await response.json();
-            if (remoteData) {
+            if (remoteData && Array.isArray(remoteData)) {
                 let localHistory = JSON.parse(localStorage.getItem('stock_history') || '[]');
-                const localIds = new Set(localHistory.map(r => r.id.toString()));
-                let merged = [...localHistory];
-                remoteData.forEach(rem => { if (!localIds.has(rem.id.toString())) merged.push(rem); });
-                merged.sort((a, b) => b.id - a.id);
-                localStorage.setItem('stock_history', JSON.stringify(merged));
+                remoteData.forEach(rem => {
+                    const localIdx = localHistory.findIndex(l => l.id.toString() === rem.id.toString());
+                    if (localIdx === -1) {
+                        localHistory.push(rem);
+                    } else {
+                        const localRec = localHistory[localIdx];
+                        if (rem.lastModified && (!localRec.lastModified || rem.lastModified > localRec.lastModified)) {
+                            localHistory[localIdx] = rem;
+                        }
+                    }
+                });
+                localHistory.sort((a, b) => b.id - a.id);
+                localStorage.setItem('stock_history', JSON.stringify(localHistory));
                 renderHistory();
                 updateLastSyncStatus();
             }
-        } catch (e) { console.error(e); } finally { if (!isAuto) { btn.textContent = '立即手動同步'; btn.disabled = false; } }
+        } catch (e) { console.error('同步失敗:', e); } finally { if (!isAuto) { btn.textContent = '立即手動同步'; btn.disabled = false; } }
     }
 
     function updateLastSyncStatus() {
