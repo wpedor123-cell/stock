@@ -214,8 +214,23 @@
 <body>
 
 <div class="container">
-    <h1>台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V012</span></h1>
+    <h1>台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V014</span></h1>
     
+    <!-- 同步設定區塊 -->
+    <div style="background: #fcf3cf; padding: 10px; border-radius: 8px; margin-bottom: 20px; font-size: 0.85rem;">
+        <details id="syncDetails">
+            <summary style="cursor: pointer; color: #856404; font-weight: bold;">☁️ 跨平台雲端同步設定 <span id="lastSyncTime" style="font-weight: normal; font-size: 0.7rem; color: #d4ac0d; margin-left: 10px;"></span></summary>
+            <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+                <input type="password" id="gasUrl" placeholder="貼上 Google Apps Script 網頁應用程式網址" style="width: 100%; font-size: 0.8rem;">
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="saveGasSettings()" style="background: #f39c12; font-size: 0.8rem; padding: 5px 15px;">儲存網址</button>
+                    <button onclick="fetchFromGoogle()" id="syncBtn" style="background: #2980b9; font-size: 0.8rem; padding: 5px 15px;">立即手動同步</button>
+                </div>
+                <small style="color: #666;">💡 只要各裝置貼上相同網址，開啟網頁時會自動完成同步。</small>
+            </div>
+        </details>
+    </div>
+
     <div class="input-grid">
         <div class="input-group">
             <label for="stockCode">股票代號 <span id="loadStatus" style="font-weight: normal; font-size: 0.7rem; color: #27ae60; margin-left: 5px;"></span></label>
@@ -344,6 +359,14 @@
     window.onload = async () => {
         const stockInput = document.getElementById('stockCode');
         const stockNameDisplay = document.getElementById('resStockName');
+        const gasInput = document.getElementById('gasUrl');
+
+        // 載入同步設定
+        const savedUrl = localStorage.getItem('gas_url');
+        if (savedUrl) {
+            gasInput.value = savedUrl;
+            fetchFromGoogle(true); 
+        }
 
         // 先載入備援名單
         for (const [code, name] of Object.entries(fallbackStocks)) {
@@ -374,7 +397,7 @@
                 const name = stockMap.get(code);
                 if (name) {
                     stockNameDisplay.textContent = name;
-                    // ETF 判斷: 1. 代號開頭 00 2. 代號長度>=5 3. 名稱含特定字眼
+                    // ETF 判斷
                     const isEtf = etfSet.has(code) || 
                                   code.startsWith('00') || 
                                   (code.length >= 5 && !isNaN(code.substring(0,2))) || 
@@ -414,7 +437,6 @@
                 const code = stockInput.value.trim().toUpperCase();
                 if (code) {
                     stockMap.set(code, newName);
-                    // 如果手動輸入包含關鍵字，標記為 ETF
                     if (newName.toUpperCase().includes('ETF') || newName.includes('優息') || newName.includes('高息') || newName.includes('債')) {
                         etfSet.add(code);
                     }
@@ -434,24 +456,18 @@
             'https://openapi.twse.com.tw/v1/etf/etf_all'
         ];
 
-        console.log('Starting to fetch stock data...');
         let loadCount = 0;
-
         for (const url of endpoints) {
             try {
                 const isLocal = !url.startsWith('http');
                 const fetchOptions = !isLocal ? { mode: 'cors' } : {};
-                
                 const response = await fetch(url, fetchOptions);
                 if (!response.ok) continue;
-                
                 const data = await response.json();
                 processStockData(data, url);
                 loadCount = stockMap.size;
                 updateStatus(`已載入 ${loadCount} 檔標的`);
-            } catch (error) {
-                console.warn(`Fetch error from ${url}:`, error);
-            }
+            } catch (error) { console.warn(error); }
         }
         refreshDatalist();
     }
@@ -459,24 +475,18 @@
     function processStockData(data, sourceUrl) {
         const list = Array.isArray(data) ? data : (data.value || []);
         const isEtfSource = sourceUrl.includes('etf');
-        
         list.forEach(item => {
             const code = (item.Code || item.stockNo || item.SecurityCode || item.SecuritiesCompanyCode || "").toString().trim().toUpperCase();
             let name = (item.Name || item.stockName || item.SecurityName || item.CompanyName || "").toString().trim();
-            
             if (code && name) {
                 const isGarbled = /[疇矇礎癟聶癒瓣繡繙繚]/.test(name);
                 const oldName = stockMap.get(code);
                 const oldIsGarbled = oldName ? /[疇矇礎癟聶癒瓣繡繙繚]/.test(oldName) : true;
-                
                 if (!stockMap.has(code) || (oldIsGarbled && !isGarbled)) {
                     stockMap.set(code, name);
                 } else if (!isGarbled && !fallbackStocks[code]) {
-                    if (sourceUrl.includes('stock_list') || sourceUrl.startsWith('http')) {
-                        stockMap.set(code, name);
-                    }
+                    stockMap.set(code, name);
                 }
-                
                 if (isEtfSource || name.toUpperCase().includes('ETF') || code.endsWith('B') || code.endsWith('C')) {
                     etfSet.add(code);
                 }
@@ -494,10 +504,7 @@
                 processStockData(data, file.name);
                 refreshDatalist();
                 updateStatus(`手動載入完成 (${stockMap.size} 檔)`);
-                alert(`成功載入 ${file.name}！現在請輸入股票代號。`);
-            } catch (err) {
-                alert('檔案格式錯誤，請確保是正確的 JSON 格式。');
-            }
+            } catch (err) { alert('檔案格式錯誤'); }
         };
         reader.readAsText(file);
     }
@@ -532,24 +539,18 @@
         }
 
         const name = (nameDisplay === '請輸入股票代號' || nameDisplay === '查無名稱 (可手動修改)') ? (stockMap.get(code) || "未知股票") : nameDisplay;
-        
-        // 判斷是否為 ETF
         const isEtf = etfSet.has(code) || code.startsWith('00') || (code.length >= 5 && !isNaN(code.substring(0,2))) || name.includes('ETF') || code.endsWith('B') || code.endsWith('C');
-        // 債券 ETF 判斷 (B 或 C 結尾)
         const isBondEtf = (code.endsWith('B') || code.endsWith('C')) && isEtf;
         
         const buyAmount = buyPrice * quantity;
         const sellAmount = sellPrice * quantity;
-        
         let buyFee = Math.floor(buyAmount * FEE_RATE * discount);
         if (buyFee < MIN_FEE && buyAmount > 0) buyFee = MIN_FEE;
-        
         let sellFee = Math.floor(sellAmount * FEE_RATE * discount);
         if (sellFee < MIN_FEE && sellAmount > 0) sellFee = MIN_FEE;
         
         let taxRate = isEtf ? TAX_RATE_ETF : TAX_RATE_STOCK;
-        if (isBondEtf) taxRate = 0; // 債券 ETF 交易稅為 0
-        
+        if (isBondEtf) taxRate = 0;
         const tax = Math.floor(sellAmount * taxRate);
         
         const totalCost = buyAmount + buyFee;
@@ -560,13 +561,11 @@
         const now = new Date();
         const timeStr = `${now.getFullYear()}/${now.getMonth()+1}/${now.getDate()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
-        // 更新顯示
         document.getElementById('resultPanel').style.display = 'block';
         document.getElementById('resStockName').textContent = name;
         document.getElementById('resStockCode').textContent = `(${code})`;
         document.getElementById('etfTag').style.display = isEtf ? 'inline' : 'none';
         document.getElementById('resTime').textContent = timeStr;
-        
         document.getElementById('resBuyCost').textContent = buyAmount.toLocaleString();
         document.getElementById('resBuyFee').textContent = buyFee.toLocaleString();
         document.getElementById('resSellTotal').textContent = sellAmount.toLocaleString();
@@ -577,32 +576,23 @@
         const profitEl = document.getElementById('resProfit');
         profitEl.textContent = `淨利: ${Math.round(profit).toLocaleString()} TWD`;
         profitEl.className = 'profit-value ' + (profit >= 0 ? 'positive' : 'negative');
-        
         const roiEl = document.getElementById('resRoi');
         roiEl.textContent = `報酬率: ${roi.toFixed(2)}%`;
         roiEl.className = profit >= 0 ? 'positive' : 'negative';
 
-        // 存入歷史紀錄
         const record = {
-            id: Date.now(),
-            time: timeStr,
-            code: code,
-            name: name,
-            buy: buyPrice,
-            sell: sellPrice,
-            qty: quantity,
-            profit: Math.round(profit),
-            totalCost: totalCost,
-            totalIncome: totalIncome
+            id: Date.now(), time: timeStr, code: code, name: name, buy: buyPrice,
+            sell: sellPrice, qty: quantity, profit: Math.round(profit),
+            totalCost: totalCost, totalIncome: totalIncome
         };
-        
         saveRecord(record);
     }
 
     function saveRecord(record) {
         let history = JSON.parse(localStorage.getItem('stock_history') || '[]');
-        history.unshift(record); // 加到最前面
+        history.unshift(record);
         localStorage.setItem('stock_history', JSON.stringify(history));
+        syncToGoogle(record);
         renderHistory();
     }
 
@@ -611,63 +601,119 @@
         const body = document.getElementById('historyBody');
         const summaryDiv = document.getElementById('historySummary');
         body.innerHTML = '';
-        
-        if (history.length === 0) {
-            summaryDiv.style.display = 'none';
-            return;
-        }
-
+        if (history.length === 0) { summaryDiv.style.display = 'none'; return; }
         summaryDiv.style.display = 'block';
-        let totalProfit = 0;
-        let totalInvested = 0;
-        let totalReturned = 0;
-
+        let totalProfit = 0, totalInvested = 0, totalReturned = 0;
         history.forEach(rec => {
-            const profit = rec.profit;
-            const cost = rec.totalCost || (rec.buy * rec.qty); // 相容舊紀錄
-            const income = rec.totalIncome || (cost + profit);
-            const roi = cost > 0 ? (profit / cost) * 100 : 0;
-
-            totalProfit += profit;
-            totalInvested += cost;
-            totalReturned += income;
-
+            const cost = rec.totalCost || (rec.buy * rec.qty);
+            const income = rec.totalIncome || (cost + rec.profit);
+            const roi = cost > 0 ? (rec.profit / cost) * 100 : 0;
+            totalProfit += rec.profit; totalInvested += cost; totalReturned += income;
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>${rec.time}</td>
                 <td>${rec.code}<br><small>${rec.name}</small></td>
                 <td>${rec.buy} / ${rec.sell}</td>
                 <td>${rec.qty}</td>
-                <td class="${profit >= 0 ? 'positive' : 'negative'}">${profit.toLocaleString()}</td>
-                <td class="${profit >= 0 ? 'positive' : 'negative'}">${roi.toFixed(2)}%</td>
+                <td class="${rec.profit >= 0 ? 'positive' : 'negative'}">${rec.profit.toLocaleString()}</td>
+                <td class="${rec.profit >= 0 ? 'positive' : 'negative'}">${roi.toFixed(2)}%</td>
                 <td><span class="delete-btn" onclick="deleteRecord(${rec.id})">刪除</span></td>
             `;
             body.appendChild(tr);
         });
-
-        // 更新摘要
-        const totalProfitEl = document.getElementById('totalProfitSum');
-        totalProfitEl.textContent = `${totalProfit.toLocaleString()} TWD`;
-        totalProfitEl.className = totalProfit >= 0 ? 'positive' : 'negative';
-
+        document.getElementById('totalProfitSum').textContent = `${totalProfit.toLocaleString()} TWD`;
+        document.getElementById('totalProfitSum').className = totalProfit >= 0 ? 'positive' : 'negative';
         const overallRoi = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
-        const avgRoiEl = document.getElementById('avgRoiSum');
-        avgRoiEl.textContent = `${overallRoi.toFixed(2)}%`;
-        avgRoiEl.className = overallRoi >= 0 ? 'positive' : 'negative';
+        document.getElementById('avgRoiSum').textContent = `${overallRoi.toFixed(2)}%`;
+        document.getElementById('avgRoiSum').className = overallRoi >= 0 ? 'positive' : 'negative';
     }
 
     function deleteRecord(id) {
+        if (!confirm('確定要刪除嗎？')) return;
         let history = JSON.parse(localStorage.getItem('stock_history') || '[]');
         history = history.filter(r => r.id !== id);
         localStorage.setItem('stock_history', JSON.stringify(history));
+        syncDeleteToGoogle(id);
         renderHistory();
     }
 
     function clearHistory() {
-        if (confirm('確定要清除所有歷史紀錄嗎？')) {
+        if (confirm('確定要清除所有紀錄嗎？(雲端也會一併清除)')) {
             localStorage.removeItem('stock_history');
+            syncClearToGoogle();
             renderHistory();
         }
+    }
+
+    function saveGasSettings() {
+        const url = document.getElementById('gasUrl').value.trim();
+        if (!url) return;
+        localStorage.setItem('gas_url', url);
+        alert('網址已儲存！執行自動同步...');
+        fetchFromGoogle();
+    }
+
+    async function syncToGoogle(record) {
+        const url = localStorage.getItem('gas_url');
+        if (!url) return;
+        try {
+            await fetch(url, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({ action: "add", data: record })
+            });
+            updateLastSyncStatus();
+        } catch (e) { console.error(e); }
+    }
+
+    async function syncDeleteToGoogle(id) {
+        const url = localStorage.getItem('gas_url');
+        if (!url) return;
+        try {
+            await fetch(url, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({ action: "delete", id: id })
+            });
+            updateLastSyncStatus();
+        } catch (e) { console.error(e); }
+    }
+
+    async function syncClearToGoogle() {
+        const url = localStorage.getItem('gas_url');
+        if (!url) return;
+        try {
+            await fetch(url, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: "clear" }) });
+            updateLastSyncStatus();
+        } catch (e) { console.error(e); }
+    }
+
+    async function fetchFromGoogle(isAuto = false) {
+        const url = localStorage.getItem('gas_url');
+        if (!url) return;
+        const btn = document.getElementById('syncBtn');
+        if (!isAuto) { btn.textContent = '同步中...'; btn.disabled = true; }
+        try {
+            const response = await fetch(url);
+            const remoteData = await response.json();
+            if (remoteData) {
+                let localHistory = JSON.parse(localStorage.getItem('stock_history') || '[]');
+                const localIds = new Set(localHistory.map(r => r.id.toString()));
+                let merged = [...localHistory];
+                remoteData.forEach(rem => { if (!localIds.has(rem.id.toString())) merged.push(rem); });
+                merged.sort((a, b) => b.id - a.id);
+                localStorage.setItem('stock_history', JSON.stringify(merged));
+                renderHistory();
+                updateLastSyncStatus();
+            }
+        } catch (e) { console.error(e); } finally { if (!isAuto) { btn.textContent = '立即手動同步'; btn.disabled = false; } }
+    }
+
+    function updateLastSyncStatus() {
+        const now = new Date();
+        const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+        const el = document.getElementById('lastSyncTime');
+        if (el) el.textContent = `(最後同步: ${timeStr})`;
     }
 
     function clearInputs() {
