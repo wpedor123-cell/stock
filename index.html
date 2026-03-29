@@ -214,7 +214,7 @@
 <body>
 
 <div class="container">
-    <h1>台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V18</span></h1>
+    <h1>台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V19</span></h1>
     
     <!-- 同步設定區塊 -->
     <div style="background: #fcf3cf; padding: 10px; border-radius: 8px; margin-bottom: 20px; font-size: 0.85rem;">
@@ -627,6 +627,21 @@
         renderHistory();
     }
 
+    function formatDateDisplay(dateStr) {
+        if (!dateStr) return "---";
+        // 如果是 ISO 格式 (包含 T 和 Z)，進行轉換
+        if (dateStr.includes('T') && dateStr.includes('Z')) {
+            const d = new Date(dateStr);
+            if (!isNaN(d.getTime())) {
+                const yyyy = d.getFullYear();
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                return `${yyyy}/${mm}/${dd}`;
+            }
+        }
+        return dateStr; // 原本就是 YYYY/MM/DD 則直接回傳
+    }
+
     function renderHistory() {
         const history = JSON.parse(localStorage.getItem('stock_history') || '[]');
         const body = document.getElementById('historyBody');
@@ -642,7 +657,7 @@
             totalProfit += rec.profit; totalInvested += cost; totalReturned += income;
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td>${rec.time}</td>
+                <td>${formatDateDisplay(rec.time)}</td>
                 <td>${rec.code}<br><small>${rec.name}</small></td>
                 <td>${rec.buy} / ${rec.sell}</td>
                 <td>${rec.qty}</td>
