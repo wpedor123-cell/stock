@@ -216,7 +216,7 @@
 <div class="container">
     <h1 style="display: flex; align-items: center; justify-content: center; gap: 30px;">
         <img src="stock1.png" alt="Logo" style="width: 130px; height: auto; border-radius: 12px;">
-        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V23</span>
+        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V24</span>
     </h1>
     
     <!-- 同步設定區塊 -->
@@ -231,6 +231,45 @@
                     <button onclick="syncAllToGoogle()" id="syncAllBtn" style="background: #27ae60; font-size: 0.8rem; padding: 5px 15px;">上傳所有資料到雲端</button>
                 </div>
                 <small style="color: #666;">💡 只要各裝置貼上相同網址，開啟網頁時會自動完成同步。</small>
+            </div>
+        </details>
+    </div>
+
+    <!-- 理財目標設定區塊 -->
+    <div class="goal-section" style="background: #e8f8f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid #1abc9c;">
+        <details id="goalDetails" open>
+            <summary style="cursor: pointer; color: #16a085; font-weight: bold; font-size: 1.1rem;">🎯 理財目標進度追蹤</summary>
+            <div style="margin-top: 15px;">
+                <div class="input-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                    <div class="input-group">
+                        <label style="font-size: 0.8rem;">目標名稱</label>
+                        <input type="text" id="goalPurpose" placeholder="例如：日本旅遊" style="padding: 5px; font-size: 0.9rem;">
+                    </div>
+                    <div class="input-group">
+                        <label style="font-size: 0.8rem;">目標金額 (TWD)</label>
+                        <input type="number" id="goalAmount" placeholder="50000" style="padding: 5px; font-size: 0.9rem;">
+                    </div>
+                    <div class="input-group">
+                        <label style="font-size: 0.8rem;">計算起始日</label>
+                        <input type="date" id="goalStartDate" style="padding: 5px; font-size: 0.9rem;">
+                    </div>
+                </div>
+                <button onclick="saveGoal()" style="background: #1abc9c; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; width: 100%;">儲存並更新目標</button>
+                
+                <div id="goalProgressDisplay" style="margin-top: 20px; display: none;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px; align-items: flex-end;">
+                        <span id="displayGoalName" style="font-weight: bold; font-size: 1.1rem; color: #2c3e50;">目標：---</span>
+                        <span id="displayGoalPercent" style="color: #16a085; font-weight: bold; font-size: 1.2rem;">0%</span>
+                    </div>
+                    <div style="background: #d5dbdb; height: 15px; border-radius: 10px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);">
+                        <div id="goalProgressBar" style="background: linear-gradient(90deg, #1abc9c, #2ecc71); height: 100%; width: 0%; transition: width 0.8s ease-out;"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 0.85rem; color: #7f8c8d;">
+                        <span>目前累積: <span id="currentGoalProfit" style="font-weight: bold; color: #e74c3c;">0</span></span>
+                        <span>目標額: <span id="targetGoalAmount" style="font-weight: bold;">0</span></span>
+                    </div>
+                    <div id="goalStartDateInfo" style="margin-top: 5px; font-size: 0.75rem; color: #95a5a6; text-align: center;">統計日期自：--- 起</div>
+                </div>
             </div>
         </details>
     </div>
@@ -394,6 +433,15 @@
         // 顯示載入中狀態
         stockNameDisplay.textContent = '正在連線交易所 API...';
         
+        // 載入目標設定
+        const savedGoal = JSON.parse(localStorage.getItem('stock_goal') || 'null');
+        if (savedGoal) {
+            document.getElementById('goalPurpose').value = savedGoal.purpose || '';
+            document.getElementById('goalAmount').value = savedGoal.amount || '';
+            document.getElementById('goalStartDate').value = savedGoal.startDate || '';
+            updateGoalProgress();
+        }
+
         await fetchStockData();
         renderHistory();
         
@@ -695,12 +743,71 @@
         }
     }
 
+    function saveGoal() {
+        const purpose = document.getElementById('goalPurpose').value.trim();
+        const amount = parseFloat(document.getElementById('goalAmount').value);
+        const startDate = document.getElementById('goalStartDate').value;
+
+        if (!purpose || isNaN(amount) || !startDate) {
+            alert('請完整填寫目標名稱、金額與起始日期');
+            return;
+        }
+
+        const goal = { purpose, amount, startDate, lastModified: Date.now() };
+        localStorage.setItem('stock_goal', JSON.stringify(goal));
+        updateGoalProgress();
+        alert('目標已儲存並更新進度！');
+    }
+
+    function updateGoalProgress() {
+        const goal = JSON.parse(localStorage.getItem('stock_goal') || 'null');
+        if (!goal) {
+            if (document.getElementById('goalProgressDisplay')) 
+                document.getElementById('goalProgressDisplay').style.display = 'none';
+            return;
+        }
+
+        const history = JSON.parse(localStorage.getItem('stock_history') || '[]');
+        const startDay = new Date(goal.startDate);
+        startDay.setHours(0, 0, 0, 0); // 確保從當日凌晨開始算
+        
+        // 篩選出日期大於等於起始日的紀錄
+        const filteredRecords = history.filter(rec => {
+            const recDate = new Date(rec.time.replace(/\//g, '-'));
+            recDate.setHours(0, 0, 0, 0);
+            return recDate >= startDay;
+        });
+
+        const currentProfit = filteredRecords.reduce((sum, rec) => sum + rec.profit, 0);
+        const rawPercent = (currentProfit / goal.amount) * 100;
+        const displayPercent = Math.max(rawPercent, 0).toFixed(1);
+        const barWidth = Math.min(Math.max(rawPercent, 0), 100);
+
+        const progressDisplay = document.getElementById('goalProgressDisplay');
+        if (progressDisplay) {
+            progressDisplay.style.display = 'block';
+            document.getElementById('displayGoalName').textContent = `目標：${goal.purpose}`;
+            document.getElementById('displayGoalPercent').textContent = `${displayPercent}%`;
+            document.getElementById('goalProgressBar').style.width = `${barWidth}%`;
+            document.getElementById('currentGoalProfit').textContent = currentProfit.toLocaleString();
+            document.getElementById('targetGoalAmount').textContent = goal.amount.toLocaleString();
+            document.getElementById('goalStartDateInfo').textContent = `統計日期自：${goal.startDate.replace(/-/g, '/')} 起`;
+            
+            // 如果達成 100%，改變進度條顏色為金黃色
+            if (rawPercent >= 100) {
+                document.getElementById('goalProgressBar').style.background = 'linear-gradient(90deg, #f1c40f, #f39c12)';
+            } else {
+                document.getElementById('goalProgressBar').style.background = 'linear-gradient(90deg, #1abc9c, #2ecc71)';
+            }
+        }
+    }
+
     function renderHistory() {
         const history = JSON.parse(localStorage.getItem('stock_history') || '[]');
         const body = document.getElementById('historyBody');
         const summaryDiv = document.getElementById('historySummary');
         body.innerHTML = '';
-        if (history.length === 0) { summaryDiv.style.display = 'none'; return; }
+        if (history.length === 0) { summaryDiv.style.display = 'none'; updateGoalProgress(); return; }
         summaryDiv.style.display = 'block';
         
         // 預設重設全選狀態
@@ -727,6 +834,7 @@
             body.appendChild(tr);
         });
         updateSelectedSummary();
+        updateGoalProgress(); // 更新理財目標進度
     }
 
     // 進入編輯模式
