@@ -216,7 +216,7 @@
 <div class="container">
     <h1 style="display: flex; align-items: center; justify-content: center; gap: 30px;">
         <img src="stock1.png" alt="Logo" style="width: 130px; height: auto; border-radius: 12px;">
-        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V24</span>
+        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V25</span>
     </h1>
     
     <!-- 同步設定區塊 -->
@@ -743,7 +743,7 @@
         }
     }
 
-    function saveGoal() {
+    async function saveGoal() {
         const purpose = document.getElementById('goalPurpose').value.trim();
         const amount = parseFloat(document.getElementById('goalAmount').value);
         const startDate = document.getElementById('goalStartDate').value;
@@ -756,7 +756,23 @@
         const goal = { purpose, amount, startDate, lastModified: Date.now() };
         localStorage.setItem('stock_goal', JSON.stringify(goal));
         updateGoalProgress();
-        alert('目標已儲存並更新進度！');
+        
+        // 同步到雲端
+        await syncGoalToGoogle(goal);
+        alert('目標已儲存並同步至雲端！');
+    }
+
+    async function syncGoalToGoogle(goal) {
+        const url = localStorage.getItem('gas_url');
+        if (!url) return;
+        try {
+            await fetch(url, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({ action: "save_goal", data: goal })
+            });
+            updateLastSyncStatus();
+        } catch (e) { console.error('目標同步失敗:', e); }
     }
 
     function updateGoalProgress() {
@@ -869,9 +885,11 @@
         const url = localStorage.getItem('gas_url');
         if (!url) { alert('請先設定 GAS 網址'); return; }
         const history = JSON.parse(localStorage.getItem('stock_history') || '[]');
-        if (history.length === 0) { alert('目前沒有紀錄可同步'); return; }
+        const goal = JSON.parse(localStorage.getItem('stock_goal') || 'null');
         
-        if (!confirm(`確定要將本地 ${history.length} 筆資料全部同步到雲端嗎？\n(這將補充雲端缺失的資料或更新舊資料)`)) return;
+        if (history.length === 0 && !goal) { alert('目前沒有紀錄或目標可同步'); return; }
+        
+        if (!confirm(`確定要將本地所有資料 (${history.length} 筆紀錄 + 目標設定) 全部同步到雲端嗎？`)) return;
         
         const btn = document.getElementById('syncAllBtn');
         const oldText = btn.textContent;
@@ -881,7 +899,7 @@
             await fetch(url, {
                 method: 'POST',
                 mode: 'no-cors',
-                body: JSON.stringify({ action: "sync_all", data: history })
+                body: JSON.stringify({ action: "sync_all", data: history, goal: goal })
             });
             alert('同步請求已送出！');
             updateLastSyncStatus();
@@ -973,10 +991,13 @@
         if (!isAuto) { btn.textContent = '同步中...'; btn.disabled = true; }
         try {
             const response = await fetch(url);
-            const remoteData = await response.json();
-            if (remoteData && Array.isArray(remoteData)) {
+            const remotePackage = await response.json();
+            
+            // 處理歷史紀錄
+            const remoteHistory = Array.isArray(remotePackage) ? remotePackage : (remotePackage.history || []);
+            if (remoteHistory && Array.isArray(remoteHistory)) {
                 let localHistory = JSON.parse(localStorage.getItem('stock_history') || '[]');
-                remoteData.forEach(rem => {
+                remoteHistory.forEach(rem => {
                     const localIdx = localHistory.findIndex(l => l.id.toString() === rem.id.toString());
                     if (localIdx === -1) {
                         localHistory.push(rem);
@@ -990,8 +1011,21 @@
                 localHistory.sort((a, b) => b.id - a.id);
                 localStorage.setItem('stock_history', JSON.stringify(localHistory));
                 renderHistory();
-                updateLastSyncStatus();
             }
+
+            // 處理目標設定同步
+            if (remotePackage.goal) {
+                const remoteGoal = remotePackage.goal;
+                const localGoal = JSON.parse(localStorage.getItem('stock_goal') || 'null');
+                if (!localGoal || (remoteGoal.lastModified && (!localGoal.lastModified || remoteGoal.lastModified > localGoal.lastModified))) {
+                    localStorage.setItem('stock_goal', JSON.stringify(remoteGoal));
+                    document.getElementById('goalPurpose').value = remoteGoal.purpose || '';
+                    document.getElementById('goalAmount').value = remoteGoal.amount || '';
+                    document.getElementById('goalStartDate').value = remoteGoal.startDate || '';
+                    updateGoalProgress();
+                }
+            }
+            updateLastSyncStatus();
         } catch (e) { console.error('同步失敗:', e); } finally { if (!isAuto) { btn.textContent = '立即手動同步'; btn.disabled = false; } }
     }
 
