@@ -216,7 +216,7 @@
 <div class="container">
     <h1 style="display: flex; align-items: center; justify-content: center; gap: 30px;">
         <img src="stock1.png" alt="Logo" style="width: 130px; height: auto; border-radius: 12px;">
-        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V22</span>
+        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V23</span>
     </h1>
     
     <!-- 同步設定區塊 -->
@@ -312,11 +312,11 @@
         <div id="historySummary" class="result-panel" style="margin-top: 0; margin-bottom: 15px; border-left-color: #f39c12; background-color: #fffaf0; display: none;">
             <div class="result-grid" style="grid-template-columns: 1fr 1fr;">
                 <div class="result-item" style="flex-direction: column; align-items: center;">
-                    <span style="font-size: 0.85rem; color: #666;">累積總淨利</span>
+                    <span style="font-size: 0.85rem; color: #666;" id="profitSummaryLabel">累積總淨利</span>
                     <span id="totalProfitSum" style="font-size: 1.4rem; font-weight: bold;">0</span>
                 </div>
                 <div class="result-item" style="flex-direction: column; align-items: center;">
-                    <span style="font-size: 0.85rem; color: #666;">整體平均報酬率</span>
+                    <span style="font-size: 0.85rem; color: #666;" id="roiSummaryLabel">整體平均報酬率</span>
                     <span id="avgRoiSum" style="font-size: 1.4rem; font-weight: bold;">0%</span>
                 </div>
             </div>
@@ -326,6 +326,7 @@
             <table id="historyTable">
                 <thead>
                     <tr>
+                        <th style="width: 30px;"><input type="checkbox" id="selectAll" onclick="toggleSelectAll(this)" checked></th>
                         <th>日期</th>
                         <th>代號/名稱</th>
                         <th>買入/賣出</th>
@@ -645,6 +646,55 @@
         return dateStr; // 原本就是 YYYY/MM/DD 則直接回傳
     }
 
+    function toggleSelectAll(source) {
+        const checkboxes = document.querySelectorAll('.record-checkbox');
+        checkboxes.forEach(cb => cb.checked = source.checked);
+        updateSelectedSummary();
+    }
+
+    function updateSelectedSummary() {
+        const history = JSON.parse(localStorage.getItem('stock_history') || '[]');
+        const checkboxes = document.querySelectorAll('.record-checkbox');
+        let selectedIds = [];
+        checkboxes.forEach(cb => {
+            if (cb.checked) selectedIds.push(parseInt(cb.dataset.id));
+        });
+
+        const selectedRecords = history.filter(rec => selectedIds.includes(rec.id));
+        
+        let totalProfit = 0, totalInvested = 0;
+        selectedRecords.forEach(rec => {
+            const cost = rec.totalCost || (rec.buy * rec.qty);
+            totalProfit += rec.profit;
+            totalInvested += cost;
+        });
+
+        document.getElementById('totalProfitSum').textContent = `${totalProfit.toLocaleString()} TWD`;
+        document.getElementById('totalProfitSum').className = totalProfit >= 0 ? 'positive' : 'negative';
+        
+        const overallRoi = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
+        document.getElementById('avgRoiSum').textContent = `${overallRoi.toFixed(2)}%`;
+        document.getElementById('avgRoiSum').className = overallRoi >= 0 ? 'positive' : 'negative';
+        
+        // 更新標籤顯示筆數
+        const isAllSelected = selectedIds.length === history.length;
+        document.getElementById('profitSummaryLabel').textContent = isAllSelected ? "累積總淨利" : `已勾選 (${selectedIds.length} 筆) 總淨利`;
+        document.getElementById('roiSummaryLabel').textContent = isAllSelected ? "整體平均報酬率" : `已勾選 (${selectedIds.length} 筆) 平均報酬率`;
+
+        // 同步全選按鈕狀態
+        const selectAll = document.getElementById('selectAll');
+        if (selectedIds.length === 0) {
+            selectAll.checked = false;
+            selectAll.indeterminate = false;
+        } else if (selectedIds.length === checkboxes.length) {
+            selectAll.checked = true;
+            selectAll.indeterminate = false;
+        } else {
+            selectAll.checked = false;
+            selectAll.indeterminate = true;
+        }
+    }
+
     function renderHistory() {
         const history = JSON.parse(localStorage.getItem('stock_history') || '[]');
         const body = document.getElementById('historyBody');
@@ -652,14 +702,17 @@
         body.innerHTML = '';
         if (history.length === 0) { summaryDiv.style.display = 'none'; return; }
         summaryDiv.style.display = 'block';
-        let totalProfit = 0, totalInvested = 0, totalReturned = 0;
+        
+        // 預設重設全選狀態
+        document.getElementById('selectAll').checked = true;
+        document.getElementById('selectAll').indeterminate = false;
+
         history.forEach(rec => {
             const cost = rec.totalCost || (rec.buy * rec.qty);
-            const income = rec.totalIncome || (cost + rec.profit);
             const roi = cost > 0 ? (rec.profit / cost) * 100 : 0;
-            totalProfit += rec.profit; totalInvested += cost; totalReturned += income;
             const tr = document.createElement('tr');
             tr.innerHTML = `
+                <td style="text-align: center;"><input type="checkbox" class="record-checkbox" data-id="${rec.id}" checked onchange="updateSelectedSummary()"></td>
                 <td>${formatDateDisplay(rec.time)}</td>
                 <td>${rec.code}<br><small>${rec.name}</small></td>
                 <td>${rec.buy} / ${rec.sell}</td>
@@ -673,11 +726,7 @@
             `;
             body.appendChild(tr);
         });
-        document.getElementById('totalProfitSum').textContent = `${totalProfit.toLocaleString()} TWD`;
-        document.getElementById('totalProfitSum').className = totalProfit >= 0 ? 'positive' : 'negative';
-        const overallRoi = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
-        document.getElementById('avgRoiSum').textContent = `${overallRoi.toFixed(2)}%`;
-        document.getElementById('avgRoiSum').className = overallRoi >= 0 ? 'positive' : 'negative';
+        updateSelectedSummary();
     }
 
     // 進入編輯模式
