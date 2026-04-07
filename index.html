@@ -216,7 +216,7 @@
 <div class="container">
     <h1 style="display: flex; align-items: center; justify-content: center; gap: 30px;">
         <img src="stock1.png" alt="Logo" style="width: 130px; height: auto; border-radius: 12px;">
-        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V27</span>
+        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V28</span>
     </h1>
     
     <!-- 同步設定區塊 -->
@@ -323,6 +323,14 @@
                 <option value="0.3">3折</option>
                 <option value="0.28">2.8折</option>
             </select>
+        </div>
+    </div>
+
+    <!-- 快速輸入區塊 -->
+    <div style="margin-bottom: 20px;">
+        <div class="input-group">
+            <label for="quickInput" style="color: #1a5276; font-weight: bold; font-size: 1rem;">⚡ 快速輸入 (代號 買入 賣出 數量)</label>
+            <input type="text" id="quickInput" oninput="handleQuickInput(this.value)" placeholder="例如: 2330 買入100 賣出110 x1000 或 0050,45.2,75.2,x2000" style="border: 2px solid #1a5276; background: #ebf5fb; padding: 12px; border-radius: 8px; width: 100%; box-sizing: border-box;">
         </div>
     </div>
 
@@ -1130,7 +1138,59 @@
         if (el) el.textContent = `(最後同步: ${timeStr})`;
     }
 
+    function handleQuickInput(val) {
+        if (!val) return;
+        
+        // 將日期設為今日
+        const today = new Date();
+        document.getElementById('tradeDate').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+        // 處理分隔符號 (空格或逗號)
+        const parts = val.replace(/,/g, ' ').split(/\s+/).filter(p => p.trim() !== '');
+        
+        // 1. 提取代號 (通常是數字，或 00 開頭)
+        const codeMatch = val.match(/\b[0-9A-Z]{4,6}\b/);
+        if (codeMatch) {
+            const code = codeMatch[0].toUpperCase();
+            document.getElementById('stockCode').value = code;
+            // 手動觸發代號顯示更新
+            const name = stockMap.get(code);
+            if (name) {
+                document.getElementById('resStockName').textContent = name;
+                const isEtf = etfSet.has(code) || code.startsWith('00') || name.includes('ETF');
+                document.getElementById('etfTag').style.display = isEtf ? 'inline' : 'none';
+            }
+        }
+
+        // 2. 提取買入單價
+        const buyMatch = val.match(/買入\s*([0-9.]+)/) || val.match(/(?:\s|^)([0-9.]+)(?=\s+賣出|\s+,|$)/);
+        if (buyMatch) {
+            document.getElementById('buyPrice').value = buyMatch[1];
+        } else if (parts.length >= 2 && !isNaN(parts[1])) {
+            document.getElementById('buyPrice').value = parts[1];
+        }
+
+        // 3. 提取賣出單價
+        const sellMatch = val.match(/賣出\s*([0-9.]+)/) || val.match(/([0-9.]+)(?=\s*[x*]\s*\d+|$)/);
+        if (sellMatch) {
+            document.getElementById('sellPrice').value = sellMatch[1];
+        } else if (parts.length >= 3 && !isNaN(parts[2])) {
+            document.getElementById('sellPrice').value = parts[2];
+        }
+
+        // 4. 提取數量
+        const qtyMatch = val.match(/[x*]\s*(\d+)/) || val.match(/數量\s*(\d+)/);
+        if (qtyMatch) {
+            document.getElementById('quantity').value = qtyMatch[1];
+        } else if (parts.length >= 4) {
+            const lastPart = parts[parts.length - 1];
+            const cleanQty = lastPart.replace(/[x*]/g, '');
+            if (!isNaN(cleanQty)) document.getElementById('quantity').value = cleanQty;
+        }
+    }
+
     function clearInputs() {
+        document.getElementById('quickInput').value = '';
         document.getElementById('stockCode').value = '';
         document.getElementById('buyPrice').value = '';
         document.getElementById('sellPrice').value = '';
