@@ -216,7 +216,7 @@
 <div class="container">
     <h1 style="display: flex; align-items: center; justify-content: center; gap: 30px;">
         <img src="stock1.png" alt="Logo" style="width: 130px; height: auto; border-radius: 12px;">
-        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V26</span>
+        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V27</span>
     </h1>
     
     <!-- 同步設定區塊 -->
@@ -236,7 +236,7 @@
     </div>
 
     <!-- 理財目標設定區塊 -->
-    <div class="goal-section" style="background: #e8f8f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid #1abc9c;">
+    <div class="goal-section" style="background: #e8f8f5; padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 5px solid #1abc9c;">
         <details id="goalDetails" open>
             <summary style="cursor: pointer; color: #16a085; font-weight: bold; font-size: 1.1rem;">🎯 理財目標進度追蹤</summary>
             <div style="margin-top: 15px;">
@@ -269,6 +269,19 @@
                         <span>目標額: <span id="targetGoalAmount" style="font-weight: bold;">0</span></span>
                     </div>
                     <div id="goalStartDateInfo" style="margin-top: 5px; font-size: 0.75rem; color: #95a5a6; text-align: center;">統計日期自：--- 起</div>
+                </div>
+            </div>
+        </details>
+    </div>
+
+    <!-- 記事本區塊 -->
+    <div class="note-section" style="background: #ebf5fb; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid #3498db;">
+        <details id="noteDetails">
+            <summary style="cursor: pointer; color: #2980b9; font-weight: bold; font-size: 1.1rem;">📝 股票投資筆記本 <span id="noteLastSaved" style="font-weight: normal; font-size: 0.7rem; color: #7f8c8d; margin-left: 10px;"></span></summary>
+            <div style="margin-top: 15px;">
+                <textarea id="stockNote" style="width: 100%; min-height: 120px; padding: 10px; border: 1px solid #bdc3c7; border-radius: 6px; font-size: 0.95rem; line-height: 1.5; font-family: inherit; box-sizing: border-box; resize: vertical;" placeholder="記錄您的股票成本、張數、買賣理由或目前的投資策略..."></textarea>
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button onclick="saveNote()" style="background: #3498db; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; flex: 1;">💾 儲存並同步到雲端</button>
                 </div>
             </div>
         </details>
@@ -447,6 +460,16 @@
             document.getElementById('goalAmount').value = savedGoal.amount || '';
             document.getElementById('goalStartDate').value = savedGoal.startDate || '';
             updateGoalProgress();
+        }
+
+        // 載入筆記本內容
+        const savedNote = JSON.parse(localStorage.getItem('stock_note') || 'null');
+        if (savedNote) {
+            document.getElementById('stockNote').value = savedNote.content || '';
+            if (savedNote.lastModified) {
+                const d = new Date(savedNote.lastModified);
+                document.getElementById('noteLastSaved').textContent = `(上次儲存: ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')})`;
+            }
         }
 
         await fetchStockData();
@@ -825,6 +848,31 @@
         }
     }
 
+    async function saveNote() {
+        const content = document.getElementById('stockNote').value;
+        const noteData = { content, lastModified: Date.now() };
+        localStorage.setItem('stock_note', JSON.stringify(noteData));
+        
+        const d = new Date(noteData.lastModified);
+        document.getElementById('noteLastSaved').textContent = `(上次儲存: ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')})`;
+        
+        await syncNoteToGoogle(noteData);
+        alert('筆記已儲存並同步至雲端！');
+    }
+
+    async function syncNoteToGoogle(noteData) {
+        const url = localStorage.getItem('gas_url');
+        if (!url) return;
+        try {
+            await fetch(url, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({ action: "save_note", data: noteData })
+            });
+            updateLastSyncStatus();
+        } catch (e) { console.error('筆記同步失敗:', e); }
+    }
+
     function selectByDate(dateStr) {
         if (!dateStr) return;
         const targetDate = dateStr.replace(/-/g, '/');
@@ -917,10 +965,11 @@
         if (!url) { alert('請先設定 GAS 網址'); return; }
         const history = JSON.parse(localStorage.getItem('stock_history') || '[]');
         const goal = JSON.parse(localStorage.getItem('stock_goal') || 'null');
+        const note = JSON.parse(localStorage.getItem('stock_note') || 'null');
         
-        if (history.length === 0 && !goal) { alert('目前沒有紀錄或目標可同步'); return; }
+        if (history.length === 0 && !goal && !note) { alert('目前沒有紀錄、目標或筆記可同步'); return; }
         
-        if (!confirm(`確定要將本地所有資料 (${history.length} 筆紀錄 + 目標設定) 全部同步到雲端嗎？`)) return;
+        if (!confirm(`確定要將本地所有資料 (${history.length} 筆紀錄 + 目標設定 + 筆記) 全部同步到雲端嗎？`)) return;
         
         const btn = document.getElementById('syncAllBtn');
         const oldText = btn.textContent;
@@ -930,7 +979,7 @@
             await fetch(url, {
                 method: 'POST',
                 mode: 'no-cors',
-                body: JSON.stringify({ action: "sync_all", data: history, goal: goal })
+                body: JSON.stringify({ action: "sync_all", data: history, goal: goal, note: note })
             });
             alert('同步請求已送出！');
             updateLastSyncStatus();
@@ -1054,6 +1103,20 @@
                     document.getElementById('goalAmount').value = remoteGoal.amount || '';
                     document.getElementById('goalStartDate').value = remoteGoal.startDate || '';
                     updateGoalProgress();
+                }
+            }
+
+            // 處理筆記本同步
+            if (remotePackage.note) {
+                const remoteNote = remotePackage.note;
+                const localNote = JSON.parse(localStorage.getItem('stock_note') || 'null');
+                if (!localNote || (remoteNote.lastModified && (!localNote.lastModified || remoteNote.lastModified > localNote.lastModified))) {
+                    localStorage.setItem('stock_note', JSON.stringify(remoteNote));
+                    document.getElementById('stockNote').value = remoteNote.content || '';
+                    if (remoteNote.lastModified) {
+                        const d = new Date(remoteNote.lastModified);
+                        document.getElementById('noteLastSaved').textContent = `(上次儲存: ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')})`;
+                    }
                 }
             }
             updateLastSyncStatus();
