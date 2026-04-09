@@ -216,7 +216,7 @@
 <div class="container">
     <h1 style="display: flex; align-items: center; justify-content: center; gap: 30px;">
         <img src="stock1.png" alt="Logo" style="width: 130px; height: auto; border-radius: 12px;">
-        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V28</span>
+        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V30</span>
     </h1>
     
     <!-- 同步設定區塊 -->
@@ -282,6 +282,52 @@
                 <textarea id="stockNote" style="width: 100%; min-height: 120px; padding: 10px; border: 1px solid #bdc3c7; border-radius: 6px; font-size: 0.95rem; line-height: 1.5; font-family: inherit; box-sizing: border-box; resize: vertical;" placeholder="記錄您的股票成本、張數、買賣理由或目前的投資策略..."></textarea>
                 <div style="display: flex; gap: 10px; margin-top: 10px;">
                     <button onclick="saveNote()" style="background: #3498db; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; flex: 1;">💾 儲存並同步到雲端</button>
+                </div>
+            </div>
+        </details>
+    </div>
+
+    <!-- 股票成本紀錄區 -->
+    <div class="cost-section" style="background: #fdf2f0; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid #e74c3c;">
+        <details id="costDetails">
+            <summary style="cursor: pointer; color: #c0392b; font-weight: bold; font-size: 1.1rem;">💰 股票成本紀錄區</summary>
+            <div style="margin-top: 15px;">
+                <div class="input-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                    <div class="input-group">
+                        <label style="font-size: 0.8rem;">股票代號</label>
+                        <input type="text" id="costStockCode" placeholder="例如: 2330" list="stockSuggestions" style="padding: 5px; font-size: 0.9rem;">
+                    </div>
+                    <div class="input-group">
+                        <label style="font-size: 0.8rem;">平均成本</label>
+                        <input type="number" id="costPrice" step="0.01" placeholder="0.00" style="padding: 5px; font-size: 0.9rem;">
+                    </div>
+                    <div class="input-group">
+                        <label style="font-size: 0.8rem;">持股數量 (股)</label>
+                        <input type="number" id="costQty" placeholder="1000" style="padding: 5px; font-size: 0.9rem;">
+                    </div>
+                    <div class="input-group">
+                        <label style="font-size: 0.8rem;">紀錄日期</label>
+                        <input type="date" id="costDate" style="padding: 5px; font-size: 0.9rem;">
+                    </div>
+                </div>
+                <div class="btn-group" style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button onclick="addCostRecord()" style="background: #e74c3c; color: white; border: none; padding: 12px 15px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; flex: 2; font-weight: bold;">新增成本紀錄</button>
+                    <button onclick="syncCostsToGoogle(null, true)" style="background: #27ae60; color: white; border: none; padding: 12px 15px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; flex: 1; font-weight: bold;">💾 雲端同步</button>
+                </div>
+                
+                <div style="overflow-x: auto; margin-top: 15px;">
+                    <table style="width: 100%; font-size: 0.85rem; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: #f9ebea;">
+                                <th style="padding: 8px; border-bottom: 2px solid #fadbd8;">代號 / 名稱</th>
+                                <th style="padding: 8px; border-bottom: 2px solid #fadbd8;">成本</th>
+                                <th style="padding: 8px; border-bottom: 2px solid #fadbd8;">股數</th>
+                                <th style="padding: 8px; border-bottom: 2px solid #fadbd8;">日期</th>
+                                <th style="padding: 8px; border-bottom: 2px solid #fadbd8;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="costBody"></tbody>
+                    </table>
                 </div>
             </div>
         </details>
@@ -479,6 +525,11 @@
                 document.getElementById('noteLastSaved').textContent = `(上次儲存: ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')})`;
             }
         }
+
+        // 載入股票成本紀錄
+        const costDateInput = document.getElementById('costDate');
+        if (costDateInput) costDateInput.value = `${yyyy}-${mm}-${dd}`;
+        renderCosts();
 
         await fetchStockData();
         renderHistory();
@@ -881,6 +932,104 @@
         } catch (e) { console.error('筆記同步失敗:', e); }
     }
 
+    // 股票成本紀錄區邏輯
+    function addCostRecord() {
+        const code = document.getElementById('costStockCode').value.trim().toUpperCase();
+        const price = parseFloat(document.getElementById('costPrice').value);
+        const qty = parseInt(document.getElementById('costQty').value);
+        const date = document.getElementById('costDate').value;
+
+        if (!code || isNaN(price) || isNaN(qty) || !date) {
+            alert('請完整填寫股票代號、成本、股數與日期');
+            return;
+        }
+
+        const name = stockMap.get(code) || "未知股票";
+        const record = { id: Date.now(), code, name, price, qty, date, lastModified: Date.now() };
+        let costs = JSON.parse(localStorage.getItem('stock_costs') || '[]');
+        costs.unshift(record);
+        localStorage.setItem('stock_costs', JSON.stringify(costs));
+        
+        renderCosts();
+        syncCostsToGoogle(costs);
+        
+        // 清空輸入
+        document.getElementById('costStockCode').value = '';
+        document.getElementById('costPrice').value = '';
+        document.getElementById('costQty').value = '';
+    }
+
+    function renderCosts() {
+        const costs = JSON.parse(localStorage.getItem('stock_costs') || '[]');
+        const body = document.getElementById('costBody');
+        if (!body) return;
+        body.innerHTML = '';
+        
+        costs.forEach(rec => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center; cursor: pointer; color: #3498db; font-weight: bold;" onclick="useCostRecord('${rec.code}', ${rec.price}, ${rec.qty})">
+                    ${rec.code}<br><small style="color: #666; font-weight: normal;">${rec.name || ''}</small>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${rec.price.toLocaleString()}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${rec.qty.toLocaleString()}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${rec.date.replace(/-/g, '/')}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">
+                    <span class="delete-btn" onclick="deleteCostRecord(${rec.id})">刪除</span>
+                </td>
+            `;
+            body.appendChild(tr);
+        });
+    }
+
+    function deleteCostRecord(id) {
+        if (!confirm('確定要刪除此筆成本紀錄嗎？')) return;
+        let costs = JSON.parse(localStorage.getItem('stock_costs') || '[]');
+        costs = costs.filter(r => r.id !== id);
+        localStorage.setItem('stock_costs', JSON.stringify(costs));
+        renderCosts();
+        syncCostsToGoogle(costs);
+    }
+
+    function useCostRecord(code, price, qty) {
+        document.getElementById('stockCode').value = code;
+        document.getElementById('buyPrice').value = price;
+        document.getElementById('quantity').value = qty;
+        
+        // 觸發代號顯示更新
+        const nameDisplay = document.getElementById('resStockName');
+        const name = stockMap.get(code);
+        if (name) {
+            nameDisplay.textContent = name;
+            const isEtf = etfSet.has(code) || code.startsWith('00') || name.includes('ETF');
+            document.getElementById('etfTag').style.display = isEtf ? 'inline' : 'none';
+        }
+        
+        // 捲動到計算區
+        document.getElementById('stockCode').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    async function syncCostsToGoogle(costs = null, showAlert = false) {
+        if (!costs) costs = JSON.parse(localStorage.getItem('stock_costs') || '[]');
+        const url = localStorage.getItem('gas_url');
+        if (!url) {
+            if (showAlert) alert('請先設定雲端 GAS 網址');
+            return;
+        }
+        try {
+            await fetch(url, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({ action: "save_costs", data: costs })
+            });
+            updateLastSyncStatus();
+            if (showAlert) alert('成本紀錄已同步至雲端！');
+        } catch (e) { 
+            console.error('成本紀錄同步失敗:', e);
+            if (showAlert) alert('同步失敗，請檢查網路或 GAS 網址');
+        }
+    }
+
     function selectByDate(dateStr) {
         if (!dateStr) return;
         const targetDate = dateStr.replace(/-/g, '/');
@@ -974,10 +1123,11 @@
         const history = JSON.parse(localStorage.getItem('stock_history') || '[]');
         const goal = JSON.parse(localStorage.getItem('stock_goal') || 'null');
         const note = JSON.parse(localStorage.getItem('stock_note') || 'null');
+        const costs = JSON.parse(localStorage.getItem('stock_costs') || '[]');
         
-        if (history.length === 0 && !goal && !note) { alert('目前沒有紀錄、目標或筆記可同步'); return; }
+        if (history.length === 0 && !goal && !note && costs.length === 0) { alert('目前沒有紀錄、目標、筆記或成本資料可同步'); return; }
         
-        if (!confirm(`確定要將本地所有資料 (${history.length} 筆紀錄 + 目標設定 + 筆記) 全部同步到雲端嗎？`)) return;
+        if (!confirm(`確定要將本地所有資料 (${history.length} 筆紀錄 + 目標設定 + 筆記 + ${costs.length} 筆成本) 全部同步到雲端嗎？`)) return;
         
         const btn = document.getElementById('syncAllBtn');
         const oldText = btn.textContent;
@@ -987,7 +1137,7 @@
             await fetch(url, {
                 method: 'POST',
                 mode: 'no-cors',
-                body: JSON.stringify({ action: "sync_all", data: history, goal: goal, note: note })
+                body: JSON.stringify({ action: "sync_all", data: history, goal: goal, note: note, costs: costs })
             });
             alert('同步請求已送出！');
             updateLastSyncStatus();
@@ -1125,6 +1275,28 @@
                         const d = new Date(remoteNote.lastModified);
                         document.getElementById('noteLastSaved').textContent = `(上次儲存: ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')})`;
                     }
+                }
+            }
+
+            // 處理股票成本紀錄同步
+            if (remotePackage.costs) {
+                const remoteCosts = remotePackage.costs;
+                const localCosts = JSON.parse(localStorage.getItem('stock_costs') || '[]');
+                if (remoteCosts && Array.isArray(remoteCosts)) {
+                    remoteCosts.forEach(rem => {
+                        const localIdx = localCosts.findIndex(l => l.id.toString() === rem.id.toString());
+                        if (localIdx === -1) {
+                            localCosts.push(rem);
+                        } else {
+                            const localRec = localCosts[localIdx];
+                            if (rem.lastModified && (!localRec.lastModified || rem.lastModified > localRec.lastModified)) {
+                                localCosts[localIdx] = rem;
+                            }
+                        }
+                    });
+                    localCosts.sort((a, b) => b.id - a.id);
+                    localStorage.setItem('stock_costs', JSON.stringify(localCosts));
+                    renderCosts();
                 }
             }
             updateLastSyncStatus();
