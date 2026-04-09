@@ -216,7 +216,7 @@
 <div class="container">
     <h1 style="display: flex; align-items: center; justify-content: center; gap: 30px;">
         <img src="stock1.png" alt="Logo" style="width: 130px; height: auto; border-radius: 12px;">
-        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V30</span>
+        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V32</span>
     </h1>
     
     <!-- 同步設定區塊 -->
@@ -410,12 +410,14 @@
 
     <div class="history-section">
         <div class="history-actions" style="display: flex; flex-wrap: wrap; align-items: center; gap: 15px; margin-bottom: 10px;">
-            <h3 style="margin: 0; flex: 1; min-width: 150px;">計算歷史紀錄</h3>
+            <h3 style="margin: 0; flex: 1; min-width: 150px;">計算歷史紀錄 <span id="historyCount" style="font-size: 0.8rem; color: #7f8c8d; font-weight: normal; margin-left: 5px;">(0 筆)</span></h3>
             
             <div style="display: flex; gap: 8px; align-items: center; background: #f8f9fa; padding: 6px 12px; border-radius: 8px; border: 1px solid #ddd; box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);">
-                <label style="font-size: 0.85rem; color: #555; font-weight: bold; white-space: nowrap;">📅 依日期選取:</label>
-                <input type="date" id="selectDate" onchange="selectByDate(this.value)" style="padding: 4px; font-size: 0.85rem; border: 1px solid #ccc; border-radius: 4px; outline: none;">
-                <button onclick="resetSelection()" style="width: auto; padding: 4px 10px; font-size: 0.8rem; background: #95a5a6; color: white; border-radius: 4px; border: none; cursor: pointer;">重設勾選</button>
+                <label style="font-size: 0.85rem; color: #555; font-weight: bold; white-space: nowrap;">📅 篩選日期:</label>
+                <input type="date" id="filterStartDate" onchange="renderHistory()" style="padding: 4px; font-size: 0.85rem; border: 1px solid #ccc; border-radius: 4px; outline: none;">
+                <span style="font-size: 0.8rem; color: #999;">~</span>
+                <input type="date" id="filterEndDate" onchange="renderHistory()" style="padding: 4px; font-size: 0.85rem; border: 1px solid #ccc; border-radius: 4px; outline: none;">
+                <button onclick="resetFilters()" style="width: auto; padding: 4px 10px; font-size: 0.8rem; background: #95a5a6; color: white; border-radius: 4px; border: none; cursor: pointer;">清除篩選</button>
             </div>
             
             <button onclick="clearHistory()" style="width: auto; padding: 6px 12px; font-size: 0.8rem; background: #eee; color: #666; border-radius: 6px; border: 1px solid #ddd; cursor: pointer;">清除全部紀錄</button>
@@ -1030,41 +1032,48 @@
         }
     }
 
-    function selectByDate(dateStr) {
-        if (!dateStr) return;
-        const targetDate = dateStr.replace(/-/g, '/');
-        const checkboxes = document.querySelectorAll('.record-checkbox');
-        const history = JSON.parse(localStorage.getItem('stock_history') || '[]');
-        
-        checkboxes.forEach(cb => {
-            const id = parseInt(cb.dataset.id);
-            const record = history.find(r => r.id === id);
-            if (record) {
-                const recDate = formatDateDisplay(record.time);
-                cb.checked = (recDate === targetDate);
-            }
-        });
-        updateSelectedSummary();
-    }
-
-    function resetSelection() {
-        document.getElementById('selectDate').value = '';
-        const selectAll = document.getElementById('selectAll');
-        selectAll.checked = true;
-        toggleSelectAll(selectAll);
+    function resetFilters() {
+        document.getElementById('filterStartDate').value = '';
+        document.getElementById('filterEndDate').value = '';
+        renderHistory();
     }
 
     function renderHistory() {
-        const history = JSON.parse(localStorage.getItem('stock_history') || '[]');
+        let history = JSON.parse(localStorage.getItem('stock_history') || '[]');
         const body = document.getElementById('historyBody');
         const summaryDiv = document.getElementById('historySummary');
+        const countSpan = document.getElementById('historyCount');
+        
+        // 篩選邏輯
+        const startDate = document.getElementById('filterStartDate').value;
+        const endDate = document.getElementById('filterEndDate').value;
+        
+        if (startDate || endDate) {
+            history = history.filter(rec => {
+                const recDate = rec.time.replace(/\//g, '-'); // 轉為 YYYY-MM-DD
+                if (startDate && recDate < startDate) return false;
+                if (endDate && recDate > endDate) return false;
+                return true;
+            });
+        }
+
+        // 更新顯示筆數
+        if (countSpan) countSpan.textContent = `(${history.length} 筆)`;
+
         body.innerHTML = '';
-        if (history.length === 0) { summaryDiv.style.display = 'none'; updateGoalProgress(); return; }
+        if (history.length === 0) { 
+            summaryDiv.style.display = 'none'; 
+            updateGoalProgress(); 
+            return; 
+        }
         summaryDiv.style.display = 'block';
         
-        // 預設重設全選狀態
-        document.getElementById('selectAll').checked = true;
-        document.getElementById('selectAll').indeterminate = false;
+        // 確保預設勾選與狀態重設
+        const selectAll = document.getElementById('selectAll');
+        if (selectAll) {
+            selectAll.checked = true;
+            selectAll.indeterminate = false;
+        }
 
         history.forEach(rec => {
             const cost = rec.totalCost || (rec.buy * rec.qty);
