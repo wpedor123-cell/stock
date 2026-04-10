@@ -216,7 +216,7 @@
 <div class="container">
     <h1 style="display: flex; align-items: center; justify-content: center; gap: 30px;">
         <img src="stock1.png" alt="Logo" style="width: 130px; height: auto; border-radius: 12px;">
-        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V32</span>
+        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V33</span>
     </h1>
     
     <!-- 同步設定區塊 -->
@@ -328,6 +328,29 @@
                         </thead>
                         <tbody id="costBody"></tbody>
                     </table>
+                </div>
+            </div>
+        </details>
+    </div>
+
+    <!-- 台股分析資料區 -->
+    <div class="analysis-section" style="background: #f4f4f9; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid #6c5ce7;">
+        <details id="analysisDetails">
+            <summary style="cursor: pointer; color: #6c5ce7; font-weight: bold; font-size: 1.1rem;">📊 台股 AI 分析報告區</summary>
+            <div style="margin-top: 15px;">
+                <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                    <button onclick="document.getElementById('analysisFileInput').click()" style="background: #6c5ce7; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 0.85rem; flex: 1; min-width: 100px;">📂 匯入報告</button>
+                    <input type="file" id="analysisFileInput" style="display: none;" accept=".txt" multiple onchange="importAnalysisFiles(this)">
+                    <button onclick="syncAnalysisToGoogle(null, true)" style="background: #27ae60; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 0.85rem; flex: 1; min-width: 100px;">☁️ 雲端同步</button>
+                    <button onclick="clearAllAnalysis()" style="background: #eee; color: #666; border: 1px solid #ddd; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 0.85rem; flex: 1; min-width: 100px;">🗑️ 清除全部</button>
+                </div>
+                
+                <div id="analysisStockList" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #ddd;">
+                    <!-- 股票代號按鈕 -->
+                </div>
+
+                <div id="analysisContentDisplay" style="background: white; padding: 15px; border-radius: 6px; border: 1px solid #eee; min-height: 100px; max-height: 500px; overflow-y: auto; font-size: 0.95rem; line-height: 1.6; white-space: pre-wrap; color: #333;">
+                    <div style="text-align: center; color: #999; margin-top: 30px;">請點擊「匯入報告」選擇台股資料資料夾中的 .txt 檔案。</div>
                 </div>
             </div>
         </details>
@@ -532,6 +555,7 @@
         const costDateInput = document.getElementById('costDate');
         if (costDateInput) costDateInput.value = `${yyyy}-${mm}-${dd}`;
         renderCosts();
+        renderAnalysisList(); // 新增：渲染分析列表
 
         await fetchStockData();
         renderHistory();
@@ -679,6 +703,150 @@
             option.textContent = name;
             suggestions.appendChild(option);
         });
+    }
+
+    // --- 台股分析報告邏輯 ---
+    function importAnalysisFiles(input) {
+        const files = input.files;
+        if (!files.length) return;
+        
+        let loaded = 0;
+        let analysisMap = JSON.parse(localStorage.getItem('stock_analysis') || '{}');
+
+        Array.from(files).forEach(file => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                // 解析檔名範例: 0050_20260410_195437.txt
+                const parts = file.name.replace('.txt', '').split('_');
+                const code = parts[0];
+                // 嘗試組合日期格式
+                let date = '未知日期';
+                if (parts.length >= 3) {
+                    const d = parts[1];
+                    const t = parts[2];
+                    date = `${d.substring(0,4)}/${d.substring(4,6)}/${d.substring(6,8)} ${t.substring(0,2)}:${t.substring(2,4)}`;
+                }
+                
+                const content = e.target.result;
+                
+                if (!analysisMap[code]) analysisMap[code] = [];
+                // 檢查是否已存在相同時間的紀錄
+                if (!analysisMap[code].some(r => r.date === date)) {
+                    analysisMap[code].push({ date, content, lastModified: Date.now() });
+                }
+                
+                loaded++;
+                if (loaded === files.length) {
+                    localStorage.setItem('stock_analysis', JSON.stringify(analysisMap));
+                    renderAnalysisList();
+                    alert(`成功匯入 ${loaded} 份分析報告！`);
+                    syncAnalysisToGoogle(analysisMap);
+                }
+            };
+            reader.readAsText(file);
+        });
+    }
+
+    function renderAnalysisList() {
+        const analysisMap = JSON.parse(localStorage.getItem('stock_analysis') || '{}');
+        const listContainer = document.getElementById('analysisStockList');
+        if (!listContainer) return;
+
+        listContainer.innerHTML = '';
+        const codes = Object.keys(analysisMap).sort();
+
+        if (codes.length === 0) {
+            listContainer.innerHTML = '<span style="color: #999; font-size: 0.8rem;">目前無已匯入的分析報告</span>';
+            return;
+        }
+
+        codes.forEach(code => {
+            const name = stockMap.get(code) || "";
+            const btn = document.createElement('button');
+            btn.textContent = `${code} ${name} (${analysisMap[code].length})`;
+            btn.style.cssText = 'padding: 5px 10px; font-size: 0.8rem; background: #6c5ce7; color: white; border-radius: 4px; flex: none; width: auto; border: none; cursor: pointer;';
+            btn.onclick = () => showAnalysis(code);
+            listContainer.appendChild(btn);
+        });
+    }
+
+    function showAnalysis(code) {
+        const analysisMap = JSON.parse(localStorage.getItem('stock_analysis') || '{}');
+        const display = document.getElementById('analysisContentDisplay');
+        const records = analysisMap[code];
+        const name = stockMap.get(code) || "";
+
+        if (!records || !records.length) {
+            display.innerHTML = '<div style="text-align: center; color: #999; margin-top: 30px;">該標的無分析內容。</div>';
+            return;
+        }
+
+        // 排序：最新的排在上面
+        records.sort((a, b) => b.date.localeCompare(a.date));
+
+        let html = `<div style="margin-bottom: 20px; border-bottom: 2px solid #6c5ce7; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="flex: 1; min-width: 200px;">
+                <strong style="font-size: 1.2rem; color: #6c5ce7;">${code} ${name}</strong>
+                <span style="font-size: 0.8rem; color: #666; margin-left: 10px;">最新：${records[0].date}</span>
+            </div>
+            <button onclick="deleteAnalysis('${code}')" style="background: #eee; color: #e74c3c; border: 1px solid #fadbd8; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; cursor: pointer; font-weight: bold;">🗑️ 刪除此標的</button>
+        </div>`;
+
+        records.forEach((rec, index) => {
+            html += `<div style="margin-bottom: 30px; ${index > 0 ? 'border-top: 1px dashed #ccc; padding-top: 20px;' : ''}">
+                <div style="background: #eee; padding: 4px 10px; border-radius: 4px; display: inline-block; font-size: 0.8rem; margin-bottom: 10px; color: #555;">🕒 分析時間：${rec.date}</div>
+                <div style="color: #333; line-height: 1.8;">${rec.content.replace(/\n/g, '<br>')}</div>
+            </div>`;
+        });
+
+        display.innerHTML = html;
+        display.scrollTop = 0;
+    }
+
+    // 新增：個別刪除標的功能
+    function deleteAnalysis(code) {
+        if (!confirm(`確定要刪除股票代號 [${code}] 的所有 AI 分析報告嗎？`)) return;
+        
+        let analysisMap = JSON.parse(localStorage.getItem('stock_analysis') || '{}');
+        delete analysisMap[code];
+        
+        localStorage.setItem('stock_analysis', JSON.stringify(analysisMap));
+        document.getElementById('analysisContentDisplay').innerHTML = '<div style="text-align: center; color: #999; margin-top: 30px;">已刪除，請選擇其他標的。</div>';
+        
+        renderAnalysisList();
+        syncAnalysisToGoogle(analysisMap); // 同步到雲端
+    }
+
+    // 新增：清除所有報告功能
+    function clearAllAnalysis() {
+        if (!confirm('確定要清除所有已匯入的台股 AI 分析報告嗎？ (雲端也會同步清除)')) return;
+        
+        localStorage.removeItem('stock_analysis');
+        document.getElementById('analysisContentDisplay').innerHTML = '<div style="text-align: center; color: #999; margin-top: 30px;">已清除所有報告內容。</div>';
+        
+        renderAnalysisList();
+        syncAnalysisToGoogle({}); // 同步到雲端
+    }
+
+    async function syncAnalysisToGoogle(analysisData = null, showAlert = false) {
+        if (!analysisData) analysisData = JSON.parse(localStorage.getItem('stock_analysis') || '{}');
+        const url = localStorage.getItem('gas_url');
+        if (!url) {
+            if (showAlert) alert('請先設定雲端 GAS 網址');
+            return;
+        }
+        try {
+            await fetch(url, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({ action: "save_analysis", data: analysisData })
+            });
+            updateLastSyncStatus();
+            if (showAlert) alert('分析報告已同步至雲端！');
+        } catch (e) { 
+            console.error('分析報告同步失敗:', e);
+            if (showAlert) alert('同步失敗，請檢查網路或 GAS 網址');
+        }
     }
 
     function calculate() {
@@ -1133,10 +1301,13 @@
         const goal = JSON.parse(localStorage.getItem('stock_goal') || 'null');
         const note = JSON.parse(localStorage.getItem('stock_note') || 'null');
         const costs = JSON.parse(localStorage.getItem('stock_costs') || '[]');
+        const analysis = JSON.parse(localStorage.getItem('stock_analysis') || '{}');
         
-        if (history.length === 0 && !goal && !note && costs.length === 0) { alert('目前沒有紀錄、目標、筆記或成本資料可同步'); return; }
+        if (history.length === 0 && !goal && !note && costs.length === 0 && Object.keys(analysis).length === 0) { 
+            alert('目前沒有紀錄、目標、筆記、成本或分析資料可同步'); return; 
+        }
         
-        if (!confirm(`確定要將本地所有資料 (${history.length} 筆紀錄 + 目標設定 + 筆記 + ${costs.length} 筆成本) 全部同步到雲端嗎？`)) return;
+        if (!confirm(`確定要將本地所有資料 (${history.length} 筆紀錄 + 目標 + 筆記 + ${costs.length} 筆成本 + AI分析報告) 全部同步到雲端嗎？`)) return;
         
         const btn = document.getElementById('syncAllBtn');
         const oldText = btn.textContent;
@@ -1146,7 +1317,14 @@
             await fetch(url, {
                 method: 'POST',
                 mode: 'no-cors',
-                body: JSON.stringify({ action: "sync_all", data: history, goal: goal, note: note, costs: costs })
+                body: JSON.stringify({ 
+                    action: "sync_all", 
+                    data: history, 
+                    goal: goal, 
+                    note: note, 
+                    costs: costs,
+                    analysis: analysis 
+                })
             });
             alert('同步請求已送出！');
             updateLastSyncStatus();
@@ -1264,11 +1442,17 @@
             if (remotePackage.goal) {
                 const remoteGoal = remotePackage.goal;
                 const localGoal = JSON.parse(localStorage.getItem('stock_goal') || 'null');
-                if (!localGoal || (remoteGoal.lastModified && (!localGoal.lastModified || remoteGoal.lastModified > localGoal.lastModified))) {
+                
+                // 統一轉為時間戳記 (數字) 進行比較
+                const remoteTime = remoteGoal.lastModified ? new Date(remoteGoal.lastModified).getTime() : 0;
+                const localTime = (localGoal && localGoal.lastModified) ? new Date(localGoal.lastModified).getTime() : 0;
+
+                if (!localGoal || remoteTime > localTime) {
+                    console.log("發現較新的理財目標，執行同步...");
                     localStorage.setItem('stock_goal', JSON.stringify(remoteGoal));
-                    document.getElementById('goalPurpose').value = remoteGoal.purpose || '';
-                    document.getElementById('goalAmount').value = remoteGoal.amount || '';
-                    document.getElementById('goalStartDate').value = remoteGoal.startDate || '';
+                    if (document.getElementById('goalPurpose')) document.getElementById('goalPurpose').value = remoteGoal.purpose || '';
+                    if (document.getElementById('goalAmount')) document.getElementById('goalAmount').value = remoteGoal.amount || '';
+                    if (document.getElementById('goalStartDate')) document.getElementById('goalStartDate').value = remoteGoal.startDate || '';
                     updateGoalProgress();
                 }
             }
@@ -1277,12 +1461,16 @@
             if (remotePackage.note) {
                 const remoteNote = remotePackage.note;
                 const localNote = JSON.parse(localStorage.getItem('stock_note') || 'null');
-                if (!localNote || (remoteNote.lastModified && (!localNote.lastModified || remoteNote.lastModified > localNote.lastModified))) {
+                const remoteNoteTime = remoteNote.lastModified ? new Date(remoteNote.lastModified).getTime() : 0;
+                const localNoteTime = (localNote && localNote.lastModified) ? new Date(localNote.lastModified).getTime() : 0;
+
+                if (!localNote || remoteNoteTime > localNoteTime) {
                     localStorage.setItem('stock_note', JSON.stringify(remoteNote));
-                    document.getElementById('stockNote').value = remoteNote.content || '';
+                    if (document.getElementById('stockNote')) document.getElementById('stockNote').value = remoteNote.content || '';
                     if (remoteNote.lastModified) {
                         const d = new Date(remoteNote.lastModified);
-                        document.getElementById('noteLastSaved').textContent = `(上次儲存: ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')})`;
+                        const noteSavedEl = document.getElementById('noteLastSaved');
+                        if (noteSavedEl) noteSavedEl.textContent = `(同步自雲端: ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')})`;
                     }
                 }
             }
@@ -1308,6 +1496,28 @@
                     renderCosts();
                 }
             }
+
+            // 處理 AI 分析報告同步
+            if (remotePackage.analysis) {
+                const remoteAnalysis = remotePackage.analysis;
+                let localAnalysis = JSON.parse(localStorage.getItem('stock_analysis') || '{}');
+                
+                Object.keys(remoteAnalysis).forEach(code => {
+                    if (!localAnalysis[code]) {
+                        localAnalysis[code] = remoteAnalysis[code];
+                    } else {
+                        remoteAnalysis[code].forEach(remRec => {
+                            if (!localAnalysis[code].some(l => l.date === remRec.date)) {
+                                localAnalysis[code].push(remRec);
+                            }
+                        });
+                    }
+                });
+                
+                localStorage.setItem('stock_analysis', JSON.stringify(localAnalysis));
+                renderAnalysisList();
+            }
+
             updateLastSyncStatus();
         } catch (e) { console.error('同步失敗:', e); } finally { if (!isAuto) { btn.textContent = '立即手動同步'; btn.disabled = false; } }
     }
