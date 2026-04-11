@@ -216,7 +216,7 @@
 <div class="container">
     <h1 style="display: flex; align-items: center; justify-content: center; gap: 30px;">
         <img src="stock1.png" alt="Logo" style="width: 130px; height: auto; border-radius: 12px;">
-        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V35</span>
+        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V36</span>
     </h1>
     
     <!-- 同步設定區塊 -->
@@ -455,10 +455,14 @@
 
         <!-- 歷史統計摘要 -->
         <div id="historySummary" class="result-panel" style="margin-top: 0; margin-bottom: 15px; border-left-color: #f39c12; background-color: #fffaf0; display: none;">
-            <div class="result-grid" style="grid-template-columns: 1fr 1fr;">
+            <div class="result-grid" style="grid-template-columns: 1fr 1fr 1fr;">
                 <div class="result-item" style="flex-direction: column; align-items: center;">
                     <span style="font-size: 0.85rem; color: #666;" id="profitSummaryLabel">累積總淨利</span>
                     <span id="totalProfitSum" style="font-size: 1.4rem; font-weight: bold;">0</span>
+                </div>
+                <div class="result-item" style="flex-direction: column; align-items: center;">
+                    <span style="font-size: 0.85rem; color: #666;" id="qtySummaryLabel">累積總股數</span>
+                    <span id="totalQtySum" style="font-size: 1.4rem; font-weight: bold;">0</span>
                 </div>
                 <div class="result-item" style="flex-direction: column; align-items: center;">
                     <span style="font-size: 0.85rem; color: #666;" id="roiSummaryLabel">整體平均報酬率</span>
@@ -713,6 +717,33 @@
         });
     }
 
+    // --- 工具函式 ---
+    function normalizeCode(code) {
+        if (!code) return "";
+        let c = code.toString().trim().toUpperCase();
+        if (!isNaN(c)) {
+            if (c.length <= 2) return c.padStart(4, '0');
+            if (c.length === 3) return c.padStart(5, '0');
+        }
+        return c;
+    }
+
+    function formatAnalysisDate(dateStr) {
+        if (!dateStr || dateStr === '未知日期') return '未知日期';
+        if (dateStr.includes('T') && dateStr.includes('Z')) {
+            const d = new Date(dateStr);
+            if (!isNaN(d.getTime())) {
+                const yyyy = d.getFullYear();
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                const hh = String(d.getHours()).padStart(2, '0');
+                const min = String(d.getMinutes()).padStart(2, '0');
+                return `${yyyy}/${mm}/${dd} ${hh}:${min}`;
+            }
+        }
+        return dateStr;
+    }
+
     // --- 台股分析報告邏輯 ---
     function importAnalysisFiles(input) {
         const files = input.files;
@@ -813,8 +844,9 @@
         </div>`;
 
         records.forEach((rec, index) => {
+            const displayDate = formatAnalysisDate(rec.date);
             html += `<div style="margin-bottom: 30px; ${index > 0 ? 'border-top: 1px dashed #ccc; padding-top: 20px;' : ''}">
-                <div style="background: #eee; padding: 4px 10px; border-radius: 4px; display: inline-block; font-size: 0.8rem; margin-bottom: 10px; color: #555;">🕒 分析時間：${rec.date}</div>
+                <div style="background: #eee; padding: 4px 10px; border-radius: 4px; display: inline-block; font-size: 0.8rem; margin-bottom: 10px; color: #555;">🕒 分析時間：${displayDate}</div>
                 <div style="color: #333; line-height: 1.8;">${rec.content.replace(/\n/g, '<br>')}</div>
             </div>`;
         });
@@ -870,7 +902,8 @@
     }
 
     function calculate() {
-        const code = document.getElementById('stockCode').value.trim().toUpperCase();
+        let code = document.getElementById('stockCode').value.trim().toUpperCase();
+        code = normalizeCode(code); // 代號標準化
         const buyPrice = parseFloat(document.getElementById('buyPrice').value);
         const sellPrice = parseFloat(document.getElementById('sellPrice').value);
         const quantity = parseInt(document.getElementById('quantity').value);
@@ -944,6 +977,7 @@
 
     function saveRecord(record) {
         let history = JSON.parse(localStorage.getItem('stock_history') || '[]');
+        record.code = normalizeCode(record.code); // 確保存入前代號標準化
         
         if (editingId) {
             const index = history.findIndex(r => r.id === editingId);
@@ -989,16 +1023,22 @@
 
         const selectedRecords = history.filter(rec => selectedIds.includes(rec.id));
         
-        let totalProfit = 0, totalInvested = 0;
+        let totalProfit = 0, totalInvested = 0, totalQty = 0;
         selectedRecords.forEach(rec => {
             const cost = rec.totalCost || (rec.buy * rec.qty);
             totalProfit += rec.profit;
             totalInvested += cost;
+            totalQty += (parseInt(rec.qty) || 0);
         });
 
         document.getElementById('totalProfitSum').textContent = `${totalProfit.toLocaleString()} TWD`;
         document.getElementById('totalProfitSum').className = totalProfit >= 0 ? 'positive' : 'negative';
         
+        // 顯示總股數與計算張數 (1張=1000股)
+        const totalLots = (totalQty / 1000).toFixed(2);
+        document.getElementById('totalQtySum').textContent = `${totalQty.toLocaleString()} 股 (${totalLots} 張)`;
+        document.getElementById('totalQtySum').style.color = '#2980b9'; // 藍色顯示股數
+
         const overallRoi = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
         document.getElementById('avgRoiSum').textContent = `${overallRoi.toFixed(2)}%`;
         document.getElementById('avgRoiSum').className = overallRoi >= 0 ? 'positive' : 'negative';
@@ -1006,6 +1046,7 @@
         // 更新標籤顯示筆數
         const isAllSelected = selectedIds.length === history.length;
         document.getElementById('profitSummaryLabel').textContent = isAllSelected ? "累積總淨利" : `已勾選 (${selectedIds.length} 筆) 總淨利`;
+        document.getElementById('qtySummaryLabel').textContent = isAllSelected ? "累積總股數" : `已勾選 (${selectedIds.length} 筆) 總股數`;
         document.getElementById('roiSummaryLabel').textContent = isAllSelected ? "整體平均報酬率" : `已勾選 (${selectedIds.length} 筆) 平均報酬率`;
 
         // 同步全選按鈕狀態
@@ -1494,6 +1535,7 @@
             if (remoteHistory && Array.isArray(remoteHistory)) {
                 let localHistory = JSON.parse(localStorage.getItem('stock_history') || '[]');
                 remoteHistory.forEach(rem => {
+                    rem.code = normalizeCode(rem.code); // 雲端代號標準化
                     const localIdx = localHistory.findIndex(l => l.id.toString() === rem.id.toString());
                     if (localIdx === -1) {
                         localHistory.push(rem);
@@ -1504,6 +1546,8 @@
                         }
                     }
                 });
+                // 額外確保 local 舊數據也被標準化
+                localHistory = localHistory.map(r => ({ ...r, code: normalizeCode(r.code) }));
                 localHistory.sort((a, b) => b.id - a.id);
                 localStorage.setItem('stock_history', JSON.stringify(localHistory));
                 renderHistory();
@@ -1573,15 +1617,30 @@
                 const remoteAnalysis = remotePackage.analysis;
                 let localAnalysis = JSON.parse(localStorage.getItem('stock_analysis') || '{}');
                 
-                Object.keys(remoteAnalysis).forEach(code => {
-                    if (!localAnalysis[code]) {
-                        localAnalysis[code] = remoteAnalysis[code];
-                    } else {
-                        remoteAnalysis[code].forEach(remRec => {
-                            if (!localAnalysis[code].some(l => l.date === remRec.date)) {
-                                localAnalysis[code].push(remRec);
+                Object.keys(remoteAnalysis).forEach(rawCode => {
+                    const code = normalizeCode(rawCode); // 標準化雲端代號
+                    if (!localAnalysis[code]) localAnalysis[code] = [];
+                    
+                    remoteAnalysis[rawCode].forEach(remRec => {
+                        const formattedDate = formatAnalysisDate(remRec.date);
+                        // 檢查是否已存在 (以內容摘要或日期判斷)
+                        if (!localAnalysis[code].some(l => formatAnalysisDate(l.date) === formattedDate)) {
+                            localAnalysis[code].push({
+                                ...remRec,
+                                date: formattedDate // 統一存入格式化後的日期
+                            });
+                        }
+                    });
+                    
+                    // 如果原有的簡寫代號 (如 "50") 存在於 local 但不是正確格式，將其遷移後刪除
+                    if (rawCode !== code && localAnalysis[rawCode]) {
+                        localAnalysis[rawCode].forEach(oldRec => {
+                            const oldDate = formatAnalysisDate(oldRec.date);
+                            if (!localAnalysis[code].some(l => formatAnalysisDate(l.date) === oldDate)) {
+                                localAnalysis[code].push({ ...oldRec, date: oldDate });
                             }
                         });
+                        delete localAnalysis[rawCode];
                     }
                 });
                 
