@@ -612,22 +612,22 @@
         });
 
         function updateStockDisplay(code) {
-            code = code.toUpperCase();
-            if (code.length >= 2) {
-                const name = stockMap.get(code);
+            const normCode = normalizeCode(code);
+            if (normCode.length >= 2) {
+                const name = stockMap.get(normCode);
                 if (name) {
                     stockNameDisplay.textContent = name;
                     // ETF 判斷
-                    const isEtf = etfSet.has(code) || 
-                                  code.startsWith('00') || 
-                                  (code.length >= 5 && !isNaN(code.substring(0,2))) || 
+                    const isEtf = etfSet.has(normCode) || 
+                                  normCode.startsWith('00') || 
+                                  (normCode.length >= 5 && !isNaN(normCode.substring(0,2))) || 
                                   name.includes('ETF') || 
                                   name.includes('高股息') || 
                                   name.includes('優息') ||
-                                  code.endsWith('B') || 
-                                  code.endsWith('C');
+                                  normCode.endsWith('B') || 
+                                  normCode.endsWith('C');
                     
-                    const isBond = code.endsWith('B') || code.endsWith('C') || name.includes('債');
+                    const isBond = normCode.endsWith('B') || normCode.endsWith('C') || name.includes('債');
                     
                     document.getElementById('etfTag').style.display = isEtf ? 'inline' : 'none';
                     if (isEtf) {
@@ -843,9 +843,14 @@
     function normalizeCode(code) {
         if (!code) return "";
         let c = code.toString().trim().toUpperCase();
-        if (!isNaN(c)) {
-            if (c.length <= 2) return c.padStart(4, '0');
-            if (c.length === 3) return c.padStart(5, '0');
+        if (/^\d+$/.test(c)) {
+            if (c.length <= 2) c = c.padStart(4, '0');
+            else if (c.length === 3) c = c.padStart(5, '0');
+            
+            // 特別處理：如果長度為 4 且補上 00 後存在於 stockMap，則視為 6 位數代號 (如 6208 -> 006208)
+            if (c.length === 4 && typeof stockMap !== 'undefined' && stockMap.has("00" + c)) {
+                c = "00" + c;
+            }
         }
         return c;
     }
@@ -1401,7 +1406,7 @@
         // 確保遍歷所有歷史紀錄，提取所有獨特的股票代號
         history.forEach(rec => {
             if (rec && rec.code) {
-                const code = rec.code.toString().toUpperCase();
+                const code = normalizeCode(rec.code); // 使用標準化代號
                 // 如果 Map 中還沒有這個代號，或者目前的名稱是空的，就更新它
                 if (!stocks.has(code) || (stocks.get(code) === "未知股票" && rec.name !== "未知股票")) {
                     stocks.set(code, rec.name || "未知股票");
@@ -1447,14 +1452,15 @@
         
         if (startDate || endDate || stockFilter) {
             history = history.filter(rec => {
-                // 股票代號篩選 (不分大小寫)
-                if (stockFilter && rec.code.toString().toUpperCase() !== stockFilter.toUpperCase()) return false;
-                
+                // 股票代號篩選 (使用標準化代號比較)
+                const recCode = normalizeCode(rec.code);
+                if (stockFilter && recCode !== stockFilter.toUpperCase()) return false;
+
                 // 日期篩選
                 const recDate = rec.time.replace(/\//g, '-'); // 轉為 YYYY-MM-DD
                 if (startDate && recDate < startDate) return false;
                 if (endDate && recDate > endDate) return false;
-                
+
                 return true;
             });
         }
@@ -1463,15 +1469,15 @@
         if (countSpan) countSpan.textContent = `(${history.length} 筆)`;
 
         body.innerHTML = '';
-        if (history.length === 0) { 
-            summaryDiv.style.display = 'none'; 
+        if (history.length === 0) {
+            summaryDiv.style.display = 'none';
             document.getElementById('analysisChartContainer').style.display = 'none'; // 隱藏圖表
-            updateGoalProgress(); 
-            return; 
+            updateGoalProgress();
+            return;
         }
         summaryDiv.style.display = 'block';
         updateStockAnalysisChart(history); // 更新占比分析圖表
-        
+
         // 確保預設勾選與狀態重設
         const selectAll = document.getElementById('selectAll');
         if (selectAll) {
@@ -1483,10 +1489,11 @@
             const cost = rec.totalCost || (rec.buy * rec.qty);
             const roi = cost > 0 ? (rec.profit / cost) * 100 : 0;
             const tr = document.createElement('tr');
+            const displayCode = normalizeCode(rec.code);
             tr.innerHTML = `
                 <td style="text-align: center;"><input type="checkbox" class="record-checkbox" data-id="${rec.id}" checked onchange="updateSelectedSummary()"></td>
                 <td>${formatDateDisplay(rec.time)}</td>
-                <td>${rec.code}<br><small>${rec.name}</small></td>
+                <td>${displayCode}<br><small>${rec.name}</small></td>
                 <td>${rec.buy} / ${rec.sell}</td>
                 <td>${rec.qty}</td>
                 <td class="${rec.profit >= 0 ? 'positive' : 'negative'}">${rec.profit.toLocaleString()}</td>
@@ -1497,8 +1504,7 @@
                 </td>
             `;
             body.appendChild(tr);
-        });
-        updateSelectedSummary();
+        });        updateSelectedSummary();
         updateGoalProgress(); // 更新理財目標進度
     }
 
@@ -1796,7 +1802,7 @@
         // 1. 提取代號 (通常是數字，或 00 開頭)
         const codeMatch = val.match(/\b[0-9A-Z]{4,6}\b/);
         if (codeMatch) {
-            const code = codeMatch[0].toUpperCase();
+            const code = normalizeCode(codeMatch[0]); // 標準化代號
             document.getElementById('stockCode').value = code;
             // 手動觸發代號顯示更新
             const name = stockMap.get(code);
