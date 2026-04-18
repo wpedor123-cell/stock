@@ -217,7 +217,7 @@
 <div class="container">
     <h1 style="display: flex; align-items: center; justify-content: center; gap: 30px;">
         <img src="stock1.png" alt="Logo" style="width: 130px; height: auto; border-radius: 12px;">
-        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V38</span>
+        台股獲利試算軟體 <span style="font-size: 0.8rem; vertical-align: middle; color: #999;">V39</span>
     </h1>
     
     <!-- 同步設定區塊 -->
@@ -500,6 +500,14 @@
                     </div>
                 </div>
 
+                <!-- 每日獲利趨勢圖 -->
+                <div id="trendChartContainer" style="background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); display: none; border: 1px solid #eee;">
+                    <h4 style="margin: 0 0 15px 0; color: #1a5276; display: flex; align-items: center; gap: 8px;">📊 每日獲利趨勢圖 <span style="font-size: 0.8rem; font-weight: normal; color: #666;">(加總每日收益)</span></h4>
+                    <div style="width: 100%; height: 300px; position: relative;">
+                        <canvas id="dailyProfitChart"></canvas>
+                    </div>
+                </div>
+
                 <div style="overflow-x: auto;">
                     <table id="historyTable">
                         <thead>
@@ -527,6 +535,7 @@
     let etfSet = new Set();
     let editingId = null; 
     let stockChart = null;
+    let dailyTrendChart = null;
     let currentChartType = 'profit'; // 'profit' 或 'qty'
     const FEE_RATE = 0.001425;
     const TAX_RATE_STOCK = 0.003;
@@ -837,6 +846,78 @@
                                     let unit = currentChartType === 'profit' ? ' TWD' : ' 張';
                                     return `${context.label}: ${val.toLocaleString()}${unit} (${percentage})`;
                                 }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    function updateDailyTrendChart(history) {
+        const container = document.getElementById('trendChartContainer');
+        if (!history || history.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+        container.style.display = 'block';
+
+        // 數據彙整：按日期加總獲利
+        const dailyStats = {};
+        history.forEach(rec => {
+            // 統一日期格式 YYYY/MM/DD
+            const date = rec.time.includes('T') ? formatDateDisplay(rec.time) : rec.time;
+            if (!dailyStats[date]) dailyStats[date] = 0;
+            dailyStats[date] += (rec.profit || 0);
+        });
+
+        // 排序日期 (由舊到新)
+        const sortedDates = Object.keys(dailyStats).sort((a, b) => new Date(a.replace(/\//g, '-')) - new Date(b.replace(/\//g, '-')));
+        const profitData = sortedDates.map(date => dailyStats[date]);
+
+        // 定義調色盤，讓每日顏色不同
+        const palette = [
+            '#3498db', '#9b59b6', '#f1c40f', '#e67e22', '#1abc9c', 
+            '#2ecc71', '#e74c3c', '#34495e', '#16a085', '#2980b9',
+            '#8e44ad', '#f39c12', '#d35400', '#95a5a6', '#7f8c8d'
+        ];
+        const barColors = sortedDates.map((_, i) => palette[i % palette.length]);
+
+        if (dailyTrendChart) {
+            dailyTrendChart.data.labels = sortedDates;
+            dailyTrendChart.data.datasets[0].data = profitData;
+            dailyTrendChart.data.datasets[0].backgroundColor = barColors;
+            dailyTrendChart.update();
+        } else {
+            const ctx = document.getElementById('dailyProfitChart').getContext('2d');
+            dailyTrendChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: sortedDates,
+                    datasets: [{
+                        label: '單日總獲利 (TWD)',
+                        data: profitData,
+                        backgroundColor: barColors,
+                        borderRadius: 4,
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#f0f0f0' },
+                            ticks: { callback: v => v.toLocaleString() }
+                        },
+                        x: { grid: { display: false } }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => `當日總獲利: ${ctx.raw.toLocaleString()} TWD`
                             }
                         }
                     }
@@ -1267,15 +1348,37 @@
 
     async function syncGoalConfigToGoogle(config) {
         const url = localStorage.getItem('gas_url');
-        if (!url) return;
-        try {
-            await fetch(url, {
-                method: 'POST',
-                mode: 'no-cors',
-                body: JSON.stringify({ action: "save_goal_config", data: config })
-            });
-            updateLastSyncStatus();
-        } catch (e) { console.error('目標配置同步失敗:', e); }
+        if (!url || !config || !config.goals) return;
+        
+        const goals = config.goals;
+        if (goals.length === 0) return;
+
+        // 逐一發送每個目標，確保 Excel 每一列都有資料
+        for (const goal of goals) {
+            try {
+                const goalData = {
+                    purpose: goal.purpose,
+                    amount: goal.amount,
+                    startDate: goal.startDate,
+                    "目標名稱": goal.purpose,
+                    "目標金額": goal.amount,
+                    "起始日期": goal.startDate
+                };
+
+                await fetch(url, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    body: JSON.stringify({ 
+                        action: "save_goal", 
+                        ...goalData,
+                        goal_config: config // 同時附帶完整配置備份
+                    })
+                });
+            } catch (e) { 
+                console.error('個別目標同步失敗:', e); 
+            }
+        }
+        updateLastSyncStatus();
     }
 
     function updateGoalProgress() {
@@ -1572,6 +1675,7 @@
         }
         summaryDiv.style.display = 'block';
         updateStockAnalysisChart(history); // 更新占比分析圖表
+        updateDailyTrendChart(history);    // 更新每日獲利趨勢圖
 
         // 確保預設勾選與狀態重設
         const selectAll = document.getElementById('selectAll');
@@ -1639,30 +1743,53 @@
         const note = JSON.parse(localStorage.getItem('stock_note') || 'null');
         const costs = JSON.parse(localStorage.getItem('stock_costs') || '[]');
         const analysis = JSON.parse(localStorage.getItem('stock_analysis') || '{}');
-        
+
         if (history.length === 0 && !goalConfig && !note && costs.length === 0 && Object.keys(analysis).length === 0) { 
             alert('目前沒有紀錄、理財目標、筆記、成本或分析資料可同步'); return; 
         }
-        
+
         if (!confirm(`確定要將本地所有資料 (${history.length} 筆紀錄 + 理財目標配置 + 筆記 + ${costs.length} 筆成本 + AI分析報告) 全部同步到雲端嗎？`)) return;
-        
+
         const btn = document.getElementById('syncAllBtn');
         const oldText = btn.textContent;
         btn.textContent = '同步中...'; btn.disabled = true;
-        
+
         try {
+            // 1. 同步完整資料 (歷史紀錄、筆記、分析報告等)
             await fetch(url, {
                 method: 'POST',
                 mode: 'no-cors',
                 body: JSON.stringify({ 
                     action: "sync_all", 
                     data: history, 
+                    history: history,
                     goal_config: goalConfig, 
                     note: note, 
                     costs: costs,
                     analysis: analysis 
                 })
             });
+
+            // 2. 針對理財目標進行個別循環同步，確保 Excel 每一列都有顯示
+            if (goalConfig && goalConfig.goals) {
+                for (const goal of goalConfig.goals) {
+                    const goalData = {
+                        action: "save_goal",
+                        purpose: goal.purpose,
+                        amount: goal.amount,
+                        startDate: goal.startDate,
+                        "目標名稱": goal.purpose,
+                        "目標金額": goal.amount,
+                        "起始日期": goal.startDate
+                    };
+                    await fetch(url, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        body: JSON.stringify(goalData)
+                    });
+                }
+            }
+
             alert('同步請求已送出！');
             updateLastSyncStatus();
         } catch (e) { 
@@ -1672,7 +1799,6 @@
             btn.textContent = oldText; btn.disabled = false;
         }
     }
-
     async function syncUpdateToGoogle(record) {
         const url = localStorage.getItem('gas_url');
         if (!url) return;
@@ -1795,20 +1921,35 @@
                     updateGoalProgress();
                 }
             } else if (remotePackage.goal) {
-                // 處理舊格式目標同步
+                // 處理舊格式或已轉移到 goal 欄位的新配置同步
                 const remoteGoal = remotePackage.goal;
                 const localConfig = JSON.parse(localStorage.getItem('stock_goal_config') || 'null');
                 const remoteTime = remoteGoal.lastModified ? new Date(remoteGoal.lastModified).getTime() : 0;
                 const localTime = (localConfig && localConfig.lastModified) ? new Date(localConfig.lastModified).getTime() : 0;
 
                 if (!localConfig || remoteTime > localTime) {
-                    console.log("發現較新的舊版理財目標，執行遷移同步...");
-                    const migratedConfig = {
-                        mode: 'sequential',
-                        goals: [{ ...remoteGoal, id: Date.now() }],
-                        lastModified: remoteGoal.lastModified || Date.now()
-                    };
-                    localStorage.setItem('stock_goal_config', JSON.stringify(migratedConfig));
+                    let configToSave;
+                    if (remoteGoal.goals && Array.isArray(remoteGoal.goals)) {
+                        // 雲端存的是新格式但放在 goal 鍵值中 (例如從 sync_all 傳過去的)
+                        configToSave = remoteGoal;
+                    } else {
+                        // 真正的舊單一目標格式遷移
+                        console.log("發現較新的舊版單一理財目標，執行遷移同步...");
+                        configToSave = {
+                            mode: 'sequential',
+                            goals: [{ ...remoteGoal, id: Date.now() }],
+                            lastModified: remoteGoal.lastModified || Date.now()
+                        };
+                    }
+                    
+                    localStorage.setItem('stock_goal_config', JSON.stringify(configToSave));
+                    
+                    // 更新 UI 選項
+                    if (configToSave.mode) {
+                        const radios = document.getElementsByName('goalMode');
+                        radios.forEach(r => r.checked = r.value === configToSave.mode);
+                        document.getElementById('ratioGroup').style.display = configToSave.mode === 'allocation' ? 'flex' : 'none';
+                    }
                     updateGoalProgress();
                 }
             }
